@@ -261,7 +261,7 @@ class ApiService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/users/create-account'),
+        Uri.parse('${ApiConfig.baseUrl}/api/create-account'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'firstName': firstName,
@@ -269,13 +269,12 @@ class ApiService {
           'email': email,
           'password': password,
           'phone': phone,
-          'adminObjectId': ApiConfig.adminObjectId,
         }),
       );
 
       final result = json.decode(response.body);
       return {
-        'success': response.statusCode == 200 && result['success'] == true,
+        'success': response.statusCode == 201,
         'data': result,
       };
     } catch (e) {
@@ -292,18 +291,17 @@ class ApiService {
   }) async {
     try {
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/users/sign-in'),
+        Uri.parse('${ApiConfig.baseUrl}/api/signin'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
-          'email': email,
+          'username': email,
           'password': password,
-          'adminObjectId': ApiConfig.adminObjectId,
         }),
       );
 
       final result = json.decode(response.body);
       return {
-        'success': response.statusCode == 200 && result['success'] == true,
+        'success': response.statusCode == 200,
         'data': result,
       };
     } catch (e) {
@@ -1197,7 +1195,7 @@ class _HomePageState extends State<HomePage> {
                             borderRadius: BorderRadius.circular(4),
                           ),
                           child: Text(
-                            'Selected Category: Piece',
+                            'Selected Category: Pack',
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
