@@ -73,6 +73,26 @@ app.get('/api/products', async (req, res) => {
   }
 });
 
+// GET /api/admin/:adminId/users - Get all users for a given admin (for welcome board / sidebar)
+router.get('/api/admin/:adminId/users', async (req, res) => {
+  try {
+    const { adminId } = req.params;
+
+    const users = await UsersCreateAccount.find({ adminId }).select(
+      'firstName lastName email phone countryCode adminObjectId adminId createdAt updatedAt'
+    );
+
+    res.json({
+      success: true,
+      count: users.length,
+      users
+    });
+  } catch (error) {
+    console.error('Fetch admin users error:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // Get product by ID
 app.get('/api/products/:id', async (req, res) => {
   try {
