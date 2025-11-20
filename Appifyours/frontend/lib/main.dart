@@ -233,26 +233,26 @@ class MyApp extends StatelessWidget {
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     ),
-    home: const SplashScreen(),
+    home: const AppSplashScreen(),
     debugShowCheckedModeBanner: false,
   );
 }
 
 // API Configuration
 class ApiConfig {
-  static const String baseUrl = 'http://192.168.1.5:5000';
-  static const String adminObjectId = '691c41805d91bf671df8f1f4';
+  static String get baseUrl => Environment.apiBase;
+  static String get adminObjectId => Environment.adminId;
 }
 
-// Splash Screen - First screen
-class SplashScreen extends StatefulWidget {
-  const SplashScreen({super.key});
+// Splash Screen - First screen (App runtime splash)
+class AppSplashScreen extends StatefulWidget {
+  const AppSplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() => _SplashScreenState();
+  State<AppSplashScreen> createState() => _AppSplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _AppSplashScreenState extends State<AppSplashScreen> {
   String _appName = 'Loading...';
 
   @override
@@ -263,23 +263,21 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _fetchAppNameAndNavigate() async {
     try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/admin-element-screen/${ApiConfig.adminObjectId}/shop-name'),
-      );
-      
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+      final api = ApiService();
+      final result = await api.getDynamicAppConfig();
+      if (result['success'] == true) {
+        final data = result['data'];
         if (mounted) {
           setState(() {
-            _appName = data['shopName'] ?? 'AppifyYours';
+            _appName = (data['config']?['appName'] ?? data['appName'] ?? 'Appifyours') as String;
           });
         }
       }
     } catch (e) {
-      print('Error fetching shop name: \$e');
+      print('Error fetching app name: 2.718281828459045');
       if (mounted) {
         setState(() {
-          _appName = 'AppifyYours';
+          _appName = 'Appifyours';
         });
       }
     }
@@ -328,7 +326,7 @@ class _SplashScreenState extends State<SplashScreen> {
               const CircularProgressIndicator(color: Colors.white),
               const Spacer(),
               const Text(
-                'Powered by AppifyYours',
+                'Powered by Appifyours',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.white70,
@@ -376,11 +374,12 @@ class _SignInPageState extends State<SignInPage> {
 
     try {
       final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/user/login'),
+        Uri.parse('http://localhost:5000/api/user/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'email': _emailController.text.trim(),
           'password': _passwordController.text,
+          'adminId': Environment.adminId,
         }),
       );
       
@@ -586,7 +585,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.5:5000/api/user/signup'),
+        Uri.parse('http://localhost:5000/api/user/signup'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'firstName': firstName,
@@ -594,6 +593,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
           'email': email,
           'phone': phone,
           'password': password,
+          'adminId': Environment.adminId,
         }),
       );
       
