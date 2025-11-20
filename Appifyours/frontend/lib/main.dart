@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 
 // Define PriceUtils class
@@ -233,26 +234,26 @@ class MyApp extends StatelessWidget {
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     ),
-    home: const AppSplashScreen(),
+    home: const SplashScreen(),
     debugShowCheckedModeBanner: false,
   );
 }
 
-// API Configuration
+// API Configuration - Auto-updated with your server details
 class ApiConfig {
   static String get baseUrl => Environment.apiBase;
-  static String get adminObjectId => Environment.adminId;
+  static const String adminObjectId = '691c41805d91bf671df8f1f4'; // Will be replaced during publish
 }
 
-// Splash Screen - First screen (App runtime splash)
-class AppSplashScreen extends StatefulWidget {
-  const AppSplashScreen({super.key});
+// Splash Screen - First screen
+class SplashScreen extends StatefulWidget {
+  const SplashScreen({super.key});
 
   @override
-  State<AppSplashScreen> createState() => _AppSplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _AppSplashScreenState extends State<AppSplashScreen> {
+class _SplashScreenState extends State<SplashScreen> {
   String _appName = 'Loading...';
 
   @override
@@ -263,21 +264,23 @@ class _AppSplashScreenState extends State<AppSplashScreen> {
 
   Future<void> _fetchAppNameAndNavigate() async {
     try {
-      final api = ApiService();
-      final result = await api.getDynamicAppConfig();
-      if (result['success'] == true) {
-        final data = result['data'];
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/admin-element-screen/${ApiConfig.adminObjectId}/shop-name'),
+      );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
         if (mounted) {
           setState(() {
-            _appName = (data['config']?['appName'] ?? data['appName'] ?? 'Appifyours') as String;
+            _appName = data['shopName'] ?? 'AppifyYours';
           });
         }
       }
     } catch (e) {
-      print('Error fetching app name: 2.718281828459045');
+      print('Error fetching shop name: \$e');
       if (mounted) {
         setState(() {
-          _appName = 'Appifyours';
+          _appName = 'AppifyYours';
         });
       }
     }
@@ -326,7 +329,7 @@ class _AppSplashScreenState extends State<AppSplashScreen> {
               const CircularProgressIndicator(color: Colors.white),
               const Spacer(),
               const Text(
-                'Powered by Appifyours',
+                'Powered by AppifyYours',
                 style: TextStyle(
                   fontSize: 16,
                   color: Colors.white70,
@@ -374,12 +377,11 @@ class _SignInPageState extends State<SignInPage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://localhost:5000/api/user/login'),
+        Uri.parse('${ApiConfig.baseUrl}/api/user/login'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'email': _emailController.text.trim(),
           'password': _passwordController.text,
-          'adminId': Environment.adminId,
         }),
       );
       
@@ -584,38 +586,34 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     setState(() => _isLoading = true);
 
     try {
-      final response = await http.post(
-        Uri.parse('http://localhost:5000/api/user/signup'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'firstName': firstName,
-          'lastName': lastName,
-          'email': email,
-          'phone': phone,
-          'password': password,
-          'adminId': Environment.adminId,
-        }),
+      final apiService = ApiService();
+      final result = await apiService.dynamicSignup(
+        firstName: firstName,
+        lastName: lastName,
+        email: email,
+        password: password,
+        phone: phone,
       );
-      
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          if (mounted) {
-            setState(() => _isLoading = false);
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Account created successfully! Please sign in.'),
-                backgroundColor: Colors.green,
-              ),
-            );
-            Navigator.pop(context);
-          }
-        } else {
-          throw Exception(data['message'] ?? 'Failed to create account');
+
+      setState(() => _isLoading = false);
+
+      if (result['success'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Account created successfully! Please sign in.'),
+              backgroundColor: Colors.green,
+            ),
+          );
+          Navigator.pop(context);
         }
       } else {
-        final error = json.decode(response.body);
-        throw Exception(error['message'] ?? 'Failed to create account');
+        final data = result['data'];
+        String message = 'Failed to create account';
+        if (data is Map<String, dynamic> && data['message'] != null) {
+          message = data['message'].toString();
+        }
+        throw Exception(message);
       }
     } catch (e) {
       setState(() => _isLoading = false);
@@ -752,18 +750,64 @@ class _HomePageState extends State<HomePage> {
   final WishlistManager _wishlistManager = WishlistManager();
   String _searchQuery = '';
   List<Map<String, dynamic>> _filteredProducts = [];
+  List<Map<String, dynamic>> _dynamicProductCards = [];
+  bool _isLoading = true;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
     super.initState();
     _pageController = PageController(initialPage: 0);
-    _filteredProducts = List.from(productCards);
+    _dynamicProductCards = List.from(productCards); // Fallback to static data
+    _filteredProducts = List.from(_dynamicProductCards);
+    _loadDynamicData();
+    _startAutoRefresh();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _refreshTimer?.cancel();
     super.dispose();
+  }
+
+  // Auto-refresh every 5 seconds
+  void _startAutoRefresh() {
+    _refreshTimer = Timer.periodic(Duration(seconds: 5), (timer) {
+      _loadDynamicData(showLoading: false);
+    });
+  }
+
+  // Load dynamic data from backend
+  Future<void> _loadDynamicData({bool showLoading = true}) async {
+    try {
+      if (showLoading) {
+        setState(() => _isLoading = true);
+      }
+
+      final response = await http.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/user/app/dynamic/${ApiConfig.adminObjectId}'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data['config'] != null) {
+          final config = data['config'];
+          final newProducts = List<Map<String, dynamic>>.from(config['productCards'] ?? []);
+          
+          setState(() {
+            _dynamicProductCards = newProducts.isNotEmpty ? newProducts : productCards;
+            _filterProducts(_searchQuery); // Re-apply current filter
+            _isLoading = false;
+          });
+          print('✅ Loaded ${_dynamicProductCards.length} products from backend');
+        }
+      }
+    } catch (e) {
+      print('❌ Error loading dynamic data: $e');
+      setState(() => _isLoading = false);
+    }
   }
 
   void _onPageChanged(int index) => setState(() => _currentPageIndex = index);
@@ -777,9 +821,9 @@ class _HomePageState extends State<HomePage> {
     setState(() {
       _searchQuery = query;
       if (query.isEmpty) {
-        _filteredProducts = List.from(productCards);
+        _filteredProducts = List.from(_dynamicProductCards);
       } else {
-        _filteredProducts = productCards.where((product) {
+        _filteredProducts = _dynamicProductCards.where((product) {
           final productName = (product['productName'] ?? '').toString().toLowerCase();
           final price = (product['price'] ?? '').toString().toLowerCase();
           final discountPrice = (product['discountPrice'] ?? '').toString().toLowerCase();
@@ -947,9 +991,12 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
         Expanded(
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
+          child: RefreshIndicator(
+            onRefresh: _loadDynamicData,
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Column(
+                children: [
                   Container(
                     height: 160,
                     child: Stack(
@@ -994,7 +1041,7 @@ class _HomePageState extends State<HomePage> {
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                 ),
-                                child: Text('kani...', style: const TextStyle(fontSize: 12)),
+                                child: Text('kani_ko', style: const TextStyle(fontSize: 12)),
                               ),
                             ],
                           ),
@@ -1394,7 +1441,8 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-              ],
+                ],
+              ),
             ),
           ),
         ),
