@@ -245,94 +245,6 @@ class ApiConfig {
   static const String adminObjectId = '691c41805d91bf671df8f1f4'; // Will be replaced during publish
 }
 
-// Environment configuration
-class Environment {
-  static const String apiBase = 'http://localhost:3000';
-}
-
-// API Service for making HTTP requests
-class ApiService {
-  Future<Map<String, dynamic>> dynamicSignup({
-    required String firstName,
-    required String lastName,
-    required String email,
-    required String password,
-    required String phone,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/create-account'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'firstName': firstName,
-          'lastName': lastName,
-          'email': email,
-          'password': password,
-          'phone': phone,
-        }),
-      );
-
-      final result = json.decode(response.body);
-      return {
-        'success': response.statusCode == 201,
-        'data': result,
-      };
-    } catch (e) {
-      return {
-        'success': false,
-        'data': {'message': e.toString()},
-      };
-    }
-  }
-
-  Future<Map<String, dynamic>> dynamicLogin({
-    required String email,
-    required String password,
-  }) async {
-    try {
-      final response = await http.post(
-        Uri.parse('${ApiConfig.baseUrl}/api/signin'),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'username': email,
-          'password': password,
-        }),
-      );
-
-      final result = json.decode(response.body);
-      return {
-        'success': response.statusCode == 200,
-        'data': result,
-      };
-    } catch (e) {
-      return {
-        'success': false,
-        'data': {'message': e.toString()},
-      };
-    }
-  }
-
-  Future<Map<String, dynamic>> getDynamicAppConfig() async {
-    try {
-      final response = await http.get(
-        Uri.parse('${ApiConfig.baseUrl}/api/admin-element-screen/${ApiConfig.adminObjectId}'),
-        headers: {'Content-Type': 'application/json'},
-      );
-
-      final result = json.decode(response.body);
-      return {
-        'success': response.statusCode == 200,
-        'data': {'config': result},
-      };
-    } catch (e) {
-      return {
-        'success': false,
-        'data': {'message': e.toString()},
-      };
-    }
-  }
-}
-
 // Splash Screen - First screen
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -1052,7 +964,7 @@ class _HomePageState extends State<HomePage> {
                             _filterProducts(value);
                           },
                           decoration: InputDecoration(
-                            hintText: 'jhjd',
+                            hintText: 'priya',
                             prefixIcon: const Icon(Icons.search),
                             suffixIcon: const Icon(Icons.filter_list),
                             border: OutlineInputBorder(
