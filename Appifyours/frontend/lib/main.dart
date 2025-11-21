@@ -1041,7 +1041,7 @@ class _HomePageState extends State<HomePage> {
                                     borderRadius: BorderRadius.circular(20),
                                   ),
                                 ),
-                                child: Text('kani_ko', style: const TextStyle(fontSize: 12)),
+                                child: Text('kani', style: const TextStyle(fontSize: 12)),
                               ),
                             ],
                           ),
