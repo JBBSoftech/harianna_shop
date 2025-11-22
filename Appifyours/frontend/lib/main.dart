@@ -964,7 +964,7 @@ class _HomePageState extends State<HomePage> {
                             _filterProducts(value);
                           },
                           decoration: InputDecoration(
-                            hintText: 'Rajkumar',
+                            hintText: 'vasanth',
                             prefixIcon: const Icon(Icons.search),
                             suffixIcon: const Icon(Icons.filter_list),
                             border: OutlineInputBorder(
