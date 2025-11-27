@@ -1009,7 +1009,7 @@ class _HomePageState extends State<HomePage> {
                       children: [
                         CarouselSlider(
                           options: CarouselOptions(
-                            height: 200,
+                            height: 222.22222222222254,
                             autoPlay: true,
                             autoPlayInterval: Duration(seconds: 3),
                             autoPlayAnimationDuration: const Duration(milliseconds: 800),
