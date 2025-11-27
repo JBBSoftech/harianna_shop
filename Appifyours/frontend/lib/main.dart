@@ -241,7 +241,7 @@ class MyApp extends StatelessWidget {
 
 // API Configuration
 class ApiConfig {
-  static const String baseUrl = 'http://192.168.1.5:5000';
+  static String get baseUrl => Environment.apiBase;
   static const String adminObjectId = '691c41805d91bf671df8f1f4';
 }
 
@@ -587,7 +587,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://192.168.1.5:5000/api/user/signup'),
+        Uri.parse('http://192.168.0.9:5000/api/user/signup'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'firstName': firstName,
@@ -842,7 +842,7 @@ class _HomePageState extends State<HomePage> {
                         
                         const SizedBox(width: 8),
                         Text(
-                          'Priya S',
+                          'Priya ',
                           style: const TextStyle(
                             color: Colors.white,
                             fontWeight: FontWeight.bold,
