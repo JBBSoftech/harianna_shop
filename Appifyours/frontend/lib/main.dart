@@ -587,7 +587,7 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
 
     try {
       final response = await http.post(
-        Uri.parse('http://10.109.1.165:5000/api/user/signup'),
+        Uri.parse('http://192.168.1.5:5000/api/user/signup'),
         headers: {'Content-Type': 'application/json'},
         body: json.encode({
           'firstName': firstName,
@@ -746,7 +746,7 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class HomePageState extends State<HomePage> {
+class _HomePageState extends State<HomePage> {
   late PageController _pageController;
   int _currentPageIndex = 0;
   final CartManager _cartManager = CartManager();
@@ -1403,9 +1403,189 @@ class HomePageState extends State<HomePage> {
     );
   }
 
-
-
-   
+  Widget _buildCartPage() {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Shopping Cart'),
+        automaticallyImplyLeading: false,
+      ),
+      body: ListenableBuilder(
+        listenable: _cartManager,
+        builder: (context, child) {
+          return _cartManager.items.isEmpty
+              ? const Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.shopping_cart_outlined, size: 64, color: Colors.grey),
+                      SizedBox(height: 16),
+                      Text('Your cart is empty', style: TextStyle(fontSize: 18, color: Colors.grey)),
+                    ],
+                  ),
+                )
+          : Column(
+              children: [
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: _cartManager.items.length,
+                    itemBuilder: (context, index) {
+                      final item = _cartManager.items[index];
+                      return Card(
+                        margin: const EdgeInsets.all(8),
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Container(
+                                width: 60,
+                                height: 60,
+                                color: Colors.grey[300],
+                                child: item.image != null && item.image!.isNotEmpty
+                                    ? (item.image!.startsWith('data:image/')
+                                    ? Image.memory(
+                                  base64Decode(item.image!.split(',')[1]),
+                                  width: 60,
+                                  height: 60,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.image),
+                                )
+                                    : Image.network(
+                                  item.image!,
+                                  width: 60,
+                                  height: 60,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.image),
+                                ))
+                                    : const Icon(Icons.image),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(item.name, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                    // Show current price (effective price)
+                                    Text(
+                                      PriceUtils.formatPrice(item.effectivePrice),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                        color: Colors.blue,
+                                      ),
+                                    ),
+                                    // Show original price if there's a discount
+                                    if (item.discountPrice > 0 && item.price != item.discountPrice)
+                                      Text(
+                                        PriceUtils.formatPrice(item.price),
+                                        style: TextStyle(
+                                          fontSize: 14,
+                                          decoration: TextDecoration.lineThrough,
+                                          color: Colors.grey.shade600,
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              Row(
+                                children: [
+                                  IconButton(
+                                    onPressed: () {
+                                      if (item.quantity > 1) {
+                                        _cartManager.updateQuantity(item.id, item.quantity - 1);
+                                      } else {
+                                        _cartManager.removeItem(item.id);
+                                      }
+                                    },
+                                    icon: const Icon(Icons.remove),
+                                  ),
+                                  Text('${item.quantity}', style: const TextStyle(fontSize: 16)),
+                                  IconButton(
+                                    onPressed: () {
+                                      _cartManager.updateQuantity(item.id, item.quantity + 1);
+                                    },
+                                    icon: const Icon(Icons.add),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                // Bill Summary Section
+                Container(
+                  margin: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[50],
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.grey[300]!),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Bill Summary',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.black87,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Subtotal', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                            Text(PriceUtils.formatPrice(_cartManager.subtotal), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                      if (_cartManager.totalDiscount > 0)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 4),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              const Text('Discount', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                              Text('-$0.00', style: const TextStyle(fontSize: 14, color: Colors.green)),
+                            ],
+                          ),
+                        ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('GST (18%)', style: TextStyle(fontSize: 14, color: Colors.grey)),
+                            Text(PriceUtils.formatPrice(_cartManager.gstAmount), style: const TextStyle(fontSize: 14, color: Colors.grey)),
+                          ],
+                        ),
+                      ),
+                      const Divider(thickness: 1),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('Total', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+                            Text(PriceUtils.formatPrice(_cartManager.finalTotal), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black)),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            );
+        },
+      ),
+    );
+  }
 
   Widget _buildWishlistPage() {
     return Scaffold(
@@ -1565,6 +1745,7 @@ class HomePageState extends State<HomePage> {
       ),
     );
   }
+
   Widget _buildBottomNavigationBar() {
     return BottomNavigationBar(
       currentIndex: _currentPageIndex,
@@ -1600,4 +1781,5 @@ class HomePageState extends State<HomePage> {
       ],
     );
   }
+
 }
