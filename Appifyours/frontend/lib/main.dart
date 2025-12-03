@@ -2104,7 +2104,7 @@ class _HomePageState extends State<HomePage> {
                             onPressed: () {},
                             icon: const Icon(Icons.logout, color: Colors.white),
                             label: Text(
-                              'Logout',
+                              '',
                               style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
                             ),
                             style: ElevatedButton.styleFrom(
