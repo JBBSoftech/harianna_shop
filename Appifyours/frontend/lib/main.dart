@@ -191,7 +191,7 @@ final Map<String, dynamic> storeInfo = {
 
 // Dynamic Product Data - Will be loaded from backend
 List<Map<String, dynamic>> productCards = [];
-bool isLoading = false;
+bool isLoading = true;
 String? errorMessage;
 
 // WebSocket Real-time Sync Service
@@ -418,7 +418,7 @@ class MyApp extends StatelessWidget {
           borderRadius: BorderRadius.all(Radius.circular(8)),
         ),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: Colors.grey,
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 16),
       ),
     ),
@@ -476,7 +476,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.4:5000/api/admin/app-info'),
+        Uri.parse('http://10.181.212.165:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -1027,9 +1027,7 @@ class _HomePageState extends State<HomePage> {
   String _searchQuery = '';
   List<Map<String, dynamic>> _filteredProducts = [];
   List<Map<String, dynamic>> _dynamicProductCards = [];
-  bool _isLoading = false;
-  Timer? _refreshTimer;
-  Timer? _realtimeTimer;
+  bool _isLoading = true;
 
   @override
   void initState() {
@@ -1038,46 +1036,23 @@ class _HomePageState extends State<HomePage> {
     _dynamicProductCards = List.from(productCards); // Fallback to static data
     _filteredProducts = List.from(_dynamicProductCards);
     _loadDynamicData();
-    _startAutoRefresh();
-    _startRealtimeUpdates();
   }
 
   @override
   void dispose() {
     _pageController.dispose();
-    _refreshTimer?.cancel();
-    _realtimeTimer?.cancel();
     super.dispose();
   }
 
-  // Real-time updates every 3 seconds
-  void _startRealtimeUpdates() {
-    _realtimeTimer = Timer.periodic(Duration(minutes: 5), (timer) {
-      if (mounted) {
-        _loadDynamicData();
-        print('🔄 Real-time update check...');
-      }
-    });
-  }
-
-  // Auto-refresh every 5 minutes (reduced frequency)
-  void _startAutoRefresh() {
-    _refreshTimer = Timer.periodic(Duration(minutes: 5), (timer) {
-      _loadDynamicAppConfig(showLoading: false);
-    });
-  }
+  // Real-time updates removed - app updates dynamically via WebSocket
 
   // Load dynamic data from backend
-  Future<void> _loadDynamicAppConfig({bool showLoading = true}) async {
+  Future<void> _loadDynamicAppConfig() async {
     try {
       // Get dynamic admin ID
       final adminId = await AdminManager.getCurrentAdminId();
       print('🔍 Home page using admin ID: ${adminId}');
       
-      if (showLoading) {
-        setState(() => _isLoading = true);
-      }
-
       final response = await http.get(
         Uri.parse('${Environment.apiBase}/api/app/dynamic/${adminId}'),
         headers: {'Content-Type': 'application/json'},
@@ -1106,22 +1081,7 @@ class _HomePageState extends State<HomePage> {
   void _onPageChanged(int index) => setState(() => _currentPageIndex = index);
 
   void _onItemTapped(int index) {
-    setState(() {
-      _currentPageIndex = index;
-      // Hide notifications when navigating to the respective pages
-      if (index == 0) { // Home page
-        _showCartNotification = false;
-        _cartNotificationCount = 0;
-        _showWishlistNotification = false;
-        _wishlistNotificationCount = 0;
-      } else if (index == 1) { // Cart page
-        _showCartNotification = false;
-        _cartNotificationCount = 0;
-      } else if (index == 2) { // Wishlist page
-        _showWishlistNotification = false;
-        _wishlistNotificationCount = 0;
-      }
-    });
+    setState(() => _currentPageIndex = index);
     _pageController.jumpToPage(index);
   }
 
@@ -1175,7 +1135,18 @@ class _HomePageState extends State<HomePage> {
     return FutureBuilder<Map<String, dynamic>>(
       future: _loadDynamicStoreData(),
       builder: (context, snapshot) {
-        // Skip loading indicator - show data immediately
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Loading store data...'),
+              ],
+            ),
+          );
+        }
 
         if (snapshot.hasError) {
           return Center(
@@ -1225,19 +1196,64 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const Spacer(),
-                  IconButton(
-                    onPressed: () async {
-                      // Clear auth token and navigate to signin
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.remove('auth_token');
-                      if (mounted) {
-                        Navigator.of(context).pushNamedAndRemoveUntil(
-                          '/signin',
-                          (route) => false,
-                        );
-                      }
-                    },
-                    icon: const Icon(Icons.logout, color: Colors.white, size: 20),
+                  Stack(
+                    children: [
+                      const Icon(Icons.shopping_cart, color: Colors.white, size: 20),
+                      if (_cartManager.items.isNotEmpty)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '0',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(width: 16),
+                  Stack(
+                    children: [
+                      const Icon(Icons.favorite, color: Colors.white, size: 20),
+                      if (_wishlistManager.items.isNotEmpty)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '${_wishlistManager.items.length}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -1431,6 +1447,15 @@ class _HomePageState extends State<HomePage> {
     return FutureBuilder<List<Map<String, dynamic>>>(
       future: _loadDynamicProducts(),
       builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
+
         final products = snapshot.data ?? [];
         
         if (products.isEmpty) {
@@ -1450,22 +1475,28 @@ class _HomePageState extends State<HomePage> {
         }
 
         return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          child: GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 2,
-              mainAxisSpacing: 16,
-              crossAxisSpacing: 16,
-              childAspectRatio: 0.75,
-            ),
-            itemCount: products.length,
-            itemBuilder: (context, index) {
-              final product = products[index];
-              return _buildProductCard(product, index);
-            },
+          padding: const EdgeInsets.all(12),
+          color: Color(0xFF4a0404),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 12,
+                    crossAxisSpacing: 12,
+                    childAspectRatio: 0.68, // Adjusted for better card proportions
+                  ),
+                  itemCount: products.length,
+                  itemBuilder: (context, index) {
+                    final product = products[index];
+                    return _buildProductCard(product, index);
+                  },
+                ),
+            ],
           ),
         );
       },
@@ -1506,22 +1537,201 @@ class _HomePageState extends State<HomePage> {
     return [];
   }
 
-  // Build individual product card with professional e-commerce design
-  Widget _buildProductCardNew(Map<String, dynamic> productData, int index) {
-    return Container(
-      child: Text('Test'),
-    );
-  }
-
-  // Test method
-  Widget _testMethod() {
-    final testVar = 'test';
-    return Text(testVar);
-  }
-
-  // Build individual product card with professional e-commerce design
+  // Build individual product card
   Widget _buildProductCard(Map<String, dynamic> product, int index) {
-    return _buildProductCardNew(product, index);
+    final productId = 'product_' + index.toString();
+    final productName = product['productName'] ?? 'Product';
+    final price = product['price']?.toString() ?? '0.00';
+    final discountPrice = product['discountPrice']?.toString();
+    final image = product['imageAsset'];
+    final rating = product['rating']?.toString() ?? '4.0';
+    final isInWishlist = _wishlistManager.isInWishlist(productId);
+
+    return Container(
+      constraints: BoxConstraints(
+        minHeight: 280, // Fixed minimum height for all cards
+      ),
+      child: Card(
+        elevation: 4,
+        color: Color(0xFFFFFFFF),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image section with fixed aspect ratio
+            Expanded(
+              flex: 3,
+              child: Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  color: Colors.grey[100],
+                ),
+                child: ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                  child: image != null && image.isNotEmpty
+                      ? (image.startsWith('data:image/')
+                          ? Image.memory(
+                              base64Decode(image.split(',')[1]),
+                              width: double.infinity,
+                              height: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                color: Colors.grey[200],
+                                child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                              ),
+                            )
+                          : Image.network(
+                              image,
+                              width: double.infinity,
+                              height: double.infinity,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => Container(
+                                color: Colors.grey[200],
+                                child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                              ),
+                            ))
+                      : Container(
+                          color: Colors.grey[200],
+                          child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                        ),
+                ),
+              ),
+            ),
+            // Content section
+            Expanded(
+              flex: 2,
+              child: Padding(
+                padding: const EdgeInsets.all(12.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    // Product name
+                    Text(
+                      productName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 8),
+                    // Price section
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Current/Final Price
+                        Text(
+                          '$' + price,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.blue,
+                          ),
+                        ),
+                        // Original Price (if discount exists)
+                        if (discountPrice != null && discountPrice.isNotEmpty)
+                          Text(
+                            '$' + discountPrice,
+                            style: TextStyle(
+                              fontSize: 12,
+                              decoration: TextDecoration.lineThrough,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Rating
+                    Row(
+                      children: [
+                        Icon(Icons.star, color: Colors.amber, size: 14),
+                        Icon(Icons.star, color: Colors.amber, size: 14),
+                        Icon(Icons.star, color: Colors.amber, size: 14),
+                        Icon(Icons.star, color: Colors.amber, size: 14),
+                        Icon(Icons.star_border, color: Colors.amber, size: 14),
+                        const SizedBox(width: 4),
+                        Text(
+                          rating,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                        const Spacer(),
+                        // Wishlist button
+                        GestureDetector(
+                          onTap: () {
+                            if (isInWishlist) {
+                              _wishlistManager.removeItem(productId);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Removed from wishlist')),
+                              );
+                            } else {
+                              final wishlistItem = WishlistItem(
+                                id: productId,
+                                name: productName,
+                                price: PriceUtils.parsePrice(price),
+                                discountPrice: discountPrice != null ? PriceUtils.parsePrice(discountPrice) : 0.0,
+                                image: image,
+                              );
+                              _wishlistManager.addItem(wishlistItem);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(content: Text('Added to wishlist')),
+                              );
+                            }
+                            setState(() {}); // Refresh UI
+                          },
+                          child: Icon(
+                            isInWishlist ? Icons.favorite : Icons.favorite_border,
+                            color: isInWishlist ? Colors.red : Colors.grey,
+                            size: 20,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    // Add to Cart button
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () {
+                          final cartItem = CartItem(
+                            id: productId,
+                            name: productName,
+                            price: PriceUtils.parsePrice(price),
+                            discountPrice: discountPrice != null ? PriceUtils.parsePrice(discountPrice) : 0.0,
+                            image: image,
+                          );
+                          _cartManager.addItem(cartItem);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Added to cart')),
+                          );
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          foregroundColor: Colors.white,
+                          elevation: 2,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          'Add to Cart',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // Helper method to convert hex color to Color
@@ -1878,17 +2088,7 @@ class _HomePageState extends State<HomePage> {
                         SizedBox(
                           width: double.infinity,
                           child: ElevatedButton.icon(
-                            onPressed: () async {
-                              // Clear auth token and navigate to signin
-                              final prefs = await SharedPreferences.getInstance();
-                              await prefs.remove('auth_token');
-                              if (mounted) {
-                                Navigator.of(context).pushNamedAndRemoveUntil(
-                                  '/signin',
-                                  (Route<dynamic> route) => false,
-                                );
-                              }
-                            },
+                            onPressed: () {},
                             icon: const Icon(Icons.logout, color: Colors.white),
                             label: Text(
                               '',
