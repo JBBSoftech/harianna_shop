@@ -476,7 +476,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://10.181.212.165:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.8:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -1539,65 +1539,131 @@ class _HomePageState extends State<HomePage> {
 
   // Build individual product card
   Widget _buildProductCard(Map<String, dynamic> product, int index) {
-    final productId = 'product_' + index.toString();
-    final productName = product['productName'] ?? 'Product';
-    final price = product['price']?.toString() ?? '0.00';
-    final discountPrice = product['discountPrice']?.toString();
-    final image = product['imageAsset'];
-    final rating = product['rating']?.toString() ?? '4.0';
-    final isInWishlist = _wishlistManager.isInWishlist(productId);
+    final String productId = 'product_' + index.toString();
+    final String productName = product['productName'] ?? 'Product';
+    final double basePrice = PriceUtils.parsePrice(product['price']?.toString() ?? '0.00');
+    final double badgeDiscountPercent = double.tryParse((product['discountPercent'] ?? '0').toString()) ?? 0.0;
+    final double manualDiscountPrice = PriceUtils.parsePrice(product['discountPrice']?.toString() ?? '0.00');
+    final bool hasPercentDiscount = badgeDiscountPercent > 0;
+    final double discountedPriceFromPercent = hasPercentDiscount ? basePrice * (1 - badgeDiscountPercent / 100) : 0.0;
+    final double effectivePrice = hasPercentDiscount
+        ? discountedPriceFromPercent
+        : (manualDiscountPrice > 0 ? manualDiscountPrice : basePrice);
+    final bool hasDiscount = hasPercentDiscount || (manualDiscountPrice > 0 && manualDiscountPrice < basePrice);
+    final String? image = product['imageAsset'];
+    final String rating = product['rating']?.toString() ?? '4.0';
+    final int quantityAvailable = int.tryParse((product['quantity'] ?? '0').toString()) ?? 0;
+    final bool isSoldOut = quantityAvailable <= 0;
+    final String discountLabel;
+    if (hasPercentDiscount) {
+      discountLabel = '0% OFF';
+    } else {
+      discountLabel = 'OFFER';
+    }
+    
+    final String stockLabel;
+    if (isSoldOut) {
+      stockLabel = 'SOLD OUT';
+    } else {
+      stockLabel = 'In stock: 0';
+    }
+    final bool isInWishlist = _wishlistManager.isInWishlist(productId);
 
     return Container(
-      constraints: BoxConstraints(
-        minHeight: 280, // Fixed minimum height for all cards
+      constraints: const BoxConstraints(
+        minHeight: 280,
       ),
       child: Card(
         elevation: 4,
-        color: Color(0xFFFFFFFF),
+        color: const Color(0xFFFFFFFF),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Image section with fixed aspect ratio
+            // Image + badges section
             Expanded(
               flex: 3,
-              child: Container(
-                width: double.infinity,
-                decoration: BoxDecoration(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  color: Colors.grey[100],
-                ),
-                child: ClipRRect(
-                  borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-                  child: image != null && image.isNotEmpty
-                      ? (image.startsWith('data:image/')
-                          ? Image.memory(
-                              base64Decode(image.split(',')[1]),
-                              width: double.infinity,
-                              height: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                color: Colors.grey[200],
-                                child: const Icon(Icons.image, size: 40, color: Colors.grey),
-                              ),
-                            )
-                          : Image.network(
-                              image,
-                              width: double.infinity,
-                              height: double.infinity,
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => Container(
-                                color: Colors.grey[200],
-                                child: const Icon(Icons.image, size: 40, color: Colors.grey),
-                              ),
-                            ))
-                      : Container(
-                          color: Colors.grey[200],
-                          child: const Icon(Icons.image, size: 40, color: Colors.grey),
+              child: Stack(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    decoration: BoxDecoration(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                      color: Colors.grey[100],
+                    ),
+                    child: ClipRRect(
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                      child: image != null && image.isNotEmpty
+                          ? (image.startsWith('data:image/')
+                              ? Image.memory(
+                                  base64Decode(image.split(',')[1]),
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    color: Colors.grey[200],
+                                    child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                                  ),
+                                )
+                              : Image.network(
+                                  image,
+                                  width: double.infinity,
+                                  height: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => Container(
+                                    color: Colors.grey[200],
+                                    child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                                  ),
+                                ))
+                          : Container(
+                              color: Colors.grey[200],
+                              child: const Icon(Icons.image, size: 40, color: Colors.grey),
+                            ),
+                    ),
+                  ),
+                  if (hasDiscount)
+                    Positioned(
+                      top: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.redAccent,
+                          borderRadius: BorderRadius.circular(6),
                         ),
-                ),
+                        child: Text(
+                          discountLabel,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  if (isSoldOut)
+                    Positioned(
+                      bottom: 8,
+                      left: 8,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withOpacity(0.7),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text(
+                          'SOLD OUT',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
             // Content section
@@ -1619,48 +1685,59 @@ class _HomePageState extends State<HomePage> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 8),
-                    // Price section
+                    const SizedBox(height: 6),
+                    // Price + stock
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Current/Final Price
+                        Row(
+                          children: [
+                            Text(
+                              '₹' + effectivePrice.toStringAsFixed(2),
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.blue,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            if (hasDiscount)
+                              Text(
+                                '₹' + basePrice.toStringAsFixed(2),
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  decoration: TextDecoration.lineThrough,
+                                  color: Colors.grey.shade600,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 2),
                         Text(
-                          '$' + price,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.blue,
+                          stockLabel,
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: isSoldOut ? Colors.red : Colors.green,
+                            fontWeight: FontWeight.w500,
                           ),
                         ),
-                        // Original Price (if discount exists)
-                        if (discountPrice != null && discountPrice.isNotEmpty)
-                          Text(
-                            '$' + discountPrice,
-                            style: TextStyle(
-                              fontSize: 12,
-                              decoration: TextDecoration.lineThrough,
-                              color: Colors.grey.shade600,
-                            ),
-                          ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // Rating
+                    const SizedBox(height: 6),
+                    // Rating + wishlist
                     Row(
                       children: [
-                        Icon(Icons.star, color: Colors.amber, size: 14),
-                        Icon(Icons.star, color: Colors.amber, size: 14),
-                        Icon(Icons.star, color: Colors.amber, size: 14),
-                        Icon(Icons.star, color: Colors.amber, size: 14),
-                        Icon(Icons.star_border, color: Colors.amber, size: 14),
+                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                        const Icon(Icons.star, color: Colors.amber, size: 14),
+                        const Icon(Icons.star_border, color: Colors.amber, size: 14),
                         const SizedBox(width: 4),
                         Text(
                           rating,
                           style: const TextStyle(fontSize: 12),
                         ),
                         const Spacer(),
-                        // Wishlist button
                         GestureDetector(
                           onTap: () {
                             if (isInWishlist) {
@@ -1672,8 +1749,8 @@ class _HomePageState extends State<HomePage> {
                               final wishlistItem = WishlistItem(
                                 id: productId,
                                 name: productName,
-                                price: PriceUtils.parsePrice(price),
-                                discountPrice: discountPrice != null ? PriceUtils.parsePrice(discountPrice) : 0.0,
+                                price: basePrice,
+                                discountPrice: hasDiscount ? effectivePrice : 0.0,
                                 image: image,
                               );
                               _wishlistManager.addItem(wishlistItem);
@@ -1681,7 +1758,7 @@ class _HomePageState extends State<HomePage> {
                                 const SnackBar(content: Text('Added to wishlist')),
                               );
                             }
-                            setState(() {}); // Refresh UI
+                            setState(() {});
                           },
                           child: Icon(
                             isInWishlist ? Icons.favorite : Icons.favorite_border,
@@ -1691,26 +1768,28 @@ class _HomePageState extends State<HomePage> {
                         ),
                       ],
                     ),
-                    const SizedBox(height: 8),
-                    // Add to Cart button
+                    const SizedBox(height: 6),
+                    // Add to Cart button (disabled when sold out)
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: () {
-                          final cartItem = CartItem(
-                            id: productId,
-                            name: productName,
-                            price: PriceUtils.parsePrice(price),
-                            discountPrice: discountPrice != null ? PriceUtils.parsePrice(discountPrice) : 0.0,
-                            image: image,
-                          );
-                          _cartManager.addItem(cartItem);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Added to cart')),
-                          );
-                        },
+                        onPressed: isSoldOut
+                            ? null
+                            : () {
+                                final cartItem = CartItem(
+                                  id: productId,
+                                  name: productName,
+                                  price: basePrice,
+                                  discountPrice: hasDiscount ? effectivePrice : 0.0,
+                                  image: image,
+                                );
+                                _cartManager.addItem(cartItem);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(content: Text('Added to cart')),
+                                );
+                              },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
+                          backgroundColor: isSoldOut ? Colors.grey : Colors.blue,
                           foregroundColor: Colors.white,
                           elevation: 2,
                           padding: const EdgeInsets.symmetric(vertical: 10),
@@ -1718,9 +1797,9 @@ class _HomePageState extends State<HomePage> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Text(
-                          'Add to Cart',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                        child: Text(
+                          isSoldOut ? 'Sold Out' : 'Add to Cart',
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                         ),
                       ),
                     ),
