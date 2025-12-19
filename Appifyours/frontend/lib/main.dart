@@ -531,7 +531,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.15:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.10:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
