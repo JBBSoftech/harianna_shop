@@ -485,7 +485,7 @@ class MyApp extends StatelessWidget {
 // API Configuration - Auto-updated with your server details
 class ApiConfig {
   static String get baseUrl => Environment.apiBase;
-  static const String adminObjectId = '69451fc63c5a69f1befad942'; // Will be replaced during publish
+  static const String adminObjectId = '691c394a6bd356d1a55fd64a'; // Will be replaced during publish
 }
 
 // Dynamic Admin ID Detection
@@ -505,7 +505,7 @@ class AdminManager {
       }
       
       // Fallback to the hardcoded admin ID from generation
-      if (ApiConfig.adminObjectId != '69451fc63c5a69f1befad942') {
+      if (ApiConfig.adminObjectId != '691c394a6bd356d1a55fd64a') {
         _currentAdminId = ApiConfig.adminObjectId;
         return ApiConfig.adminObjectId;
       }
@@ -2498,3 +2498,38 @@ class _HomePageState extends State<HomePage> {
   }
 
 }
+  Widget _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      currentIndex: _currentPageIndex,
+      onTap: _onItemTapped,
+      type: BottomNavigationBarType.fixed,
+      selectedItemColor: Colors.blue,
+      unselectedItemColor: Colors.grey,
+      items: [
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.home),
+          label: 'Home',
+        ),
+        BottomNavigationBarItem(
+          icon: Badge(
+            label: Text('${_cartManager.items.length}'),
+            isLabelVisible: _cartManager.items.length > 0,
+            child: const Icon(Icons.shopping_cart),
+          ),
+          label: 'Cart',
+        ),
+        BottomNavigationBarItem(
+          icon: Badge(
+            label: Text('${_wishlistManager.items.length}'),
+            isLabelVisible: _wishlistManager.items.length > 0,
+            child: const Icon(Icons.favorite),
+          ),
+          label: 'Wishlist',
+        ),
+        const BottomNavigationBarItem(
+          icon: Icon(Icons.person),
+          label: 'Profile',
+        ),
+      ],
+    );
+  }
