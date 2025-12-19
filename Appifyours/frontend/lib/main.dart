@@ -485,7 +485,7 @@ class MyApp extends StatelessWidget {
 // API Configuration - Auto-updated with your server details
 class ApiConfig {
   static String get baseUrl => Environment.apiBase;
-  static const String adminObjectId = '6940fd70199faf82d2547507'; // Will be replaced during publish
+  static const String adminObjectId = '69451fc63c5a69f1befad942'; // Will be replaced during publish
 }
 
 // Dynamic Admin ID Detection
@@ -505,7 +505,7 @@ class AdminManager {
       }
       
       // Fallback to the hardcoded admin ID from generation
-      if (ApiConfig.adminObjectId != '6940fd70199faf82d2547507') {
+      if (ApiConfig.adminObjectId != '69451fc63c5a69f1befad942') {
         _currentAdminId = ApiConfig.adminObjectId;
         return ApiConfig.adminObjectId;
       }
@@ -531,7 +531,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.10:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.11:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -2498,38 +2498,3 @@ class _HomePageState extends State<HomePage> {
   }
 
 }
-  Widget _buildBottomNavigationBar() {
-    return BottomNavigationBar(
-      currentIndex: _currentPageIndex,
-      onTap: _onItemTapped,
-      type: BottomNavigationBarType.fixed,
-      selectedItemColor: Colors.blue,
-      unselectedItemColor: Colors.grey,
-      items: [
-        const BottomNavigationBarItem(
-          icon: Icon(Icons.home),
-          label: 'Home',
-        ),
-        BottomNavigationBarItem(
-          icon: Badge(
-            label: Text('${_cartManager.items.length}'),
-            isLabelVisible: _cartManager.items.length > 0,
-            child: const Icon(Icons.shopping_cart),
-          ),
-          label: 'Cart',
-        ),
-        BottomNavigationBarItem(
-          icon: Badge(
-            label: Text('${_wishlistManager.items.length}'),
-            isLabelVisible: _wishlistManager.items.length > 0,
-            child: const Icon(Icons.favorite),
-          ),
-          label: 'Wishlist',
-        ),
-        const BottomNavigationBarItem(
-          icon: Icon(Icons.person),
-          label: 'Profile',
-        ),
-      ],
-    );
-  }
