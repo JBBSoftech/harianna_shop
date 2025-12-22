@@ -58,10 +58,23 @@ class ApiService {
     return prefs.getString('auth_token');
   }
 
+  // Get current user ID with enhanced logging
   Future<String?> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('user_id');
+    print('=== USER ID DEBUG ===');
     print('Retrieved User ID from storage: $userId');
+    
+    // Check if we have a valid token to ensure user is authenticated
+    final token = prefs.getString('auth_token');
+    if (token == null) {
+      print('No auth token found, user may not be authenticated');
+      return null;
+    }
+    
+    print('User authenticated with token length: ${token.length}');
+    print('Token first 10 chars: ${token.substring(0, 10)}...');
+    print('=== END USER ID DEBUG ===');
     return userId;
   }
 
@@ -987,19 +1000,33 @@ class ApiService {
   // Get form data for dynamic widget generation
   Future<Map<String, dynamic>> getFormData({String? adminId}) async {
     try {
-      print('Getting form data with adminId: $adminId');
+      // Get current user ID if adminId not provided
+      final userId = adminId ?? await _getUserId();
+      print('=== FORM DATA DEBUG ===');
+      print('Getting form data for User ID: $userId');
+      print('AdminId parameter: $adminId');
       
-      // Build URL with adminId parameter
-      String url = '$baseUrl/api/get-form';
-      if (adminId != null && adminId.isNotEmpty) {
-        url += '?adminId=$adminId';
+      if (userId == null) {
+        print('No user ID found, returning fallback data');
+        return {
+          'success': false,
+          'pages': [],
+          'widgets': [],
+          'error': 'User not authenticated'
+        };
       }
+      
+      // Build URL with userId parameter (backend expects adminId but we send userId)
+      String url = '$baseUrl/api/get-form?adminId=$userId';
+      print('Making API call to: $url');
       
       final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        print('Form data fetched successfully: ${data.keys}');
+        print('Form data fetched successfully for user $userId: ${data.keys}');
+        print('Response adminId field: ${data['adminId']}');
+        print('=== END FORM DATA DEBUG ===');
         return data;
       } else {
         throw Exception('Failed to get form data: ${response.statusCode}');
@@ -1401,8 +1428,28 @@ class ApiService {
   // Get dynamic app configuration
   Future<Map<String, dynamic>> getDynamicAppConfig() async {
     try {
+      final userId = await _getUserId();
+      print('=== DYNAMIC APP CONFIG DEBUG ===');
+      print('Fetching dynamic app config for User ID: $userId');
+      
+      if (userId == null) {
+        print('No user ID found, returning default config');
+        return {
+          'success': false,
+          'data': {
+            'config': {
+              'appName': 'MyApp',
+              'themeColor': '#2196F3',
+              'bannerImage': '',
+            }
+          },
+          'statusCode': 401,
+        };
+      }
+
+      print('Making API call to: $baseUrl/api/app/dynamic/$userId');
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config'),
+        Uri.parse('$baseUrl/api/app/dynamic/$userId'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -1410,6 +1457,7 @@ class ApiService {
 
       print('Dynamic App Config Response Status: ${response.statusCode}');
       print('Dynamic App Config Response Body: ${response.body}');
+      print('=== END DYNAMIC APP CONFIG DEBUG ===');
 
       return {
         'success': response.statusCode == 200,
