@@ -513,7 +513,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.10:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.14:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -900,18 +900,13 @@ class _CreateAccountPageState extends State<CreateAccountPage> {
     setState(() => _isLoading = true);
 
     try {
-      // Get the current admin ID for this generated app so that
-      // new users are correctly linked to their admin/shop
-      final adminId = await AdminManager.getCurrentAdminId();
-
       final apiService = ApiService();
-      final result = await apiService.dynamicSignupWithAdmin(
+      final result = await apiService.dynamicSignup(
         firstName: firstName,
         lastName: lastName,
         email: email,
         password: password,
         phone: phone,
-        adminId: adminId,
       );
 
       setState(() => _isLoading = false);
