@@ -1401,8 +1401,26 @@ class ApiService {
   // Get dynamic app configuration
   Future<Map<String, dynamic>> getDynamicAppConfig() async {
     try {
+      final userId = await _getUserId();
+      print('Fetching dynamic app config for User ID: $userId');
+      
+      if (userId == null) {
+        print('No user ID found, returning default config');
+        return {
+          'success': false,
+          'data': {
+            'config': {
+              'appName': 'MyApp',
+              'themeColor': '#2196F3',
+              'bannerImage': '',
+            }
+          },
+          'statusCode': 401,
+        };
+      }
+
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config'),
+        Uri.parse('$baseUrl/api/app/dynamic/$userId'),
         headers: {
           'Content-Type': 'application/json',
         },
