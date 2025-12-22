@@ -433,6 +433,77 @@ class ApiService {
     }
   }
 
+  // Email login for app users
+  Future<Map<String, dynamic>> emailLogin(String email, String password, {String? adminId}) async {
+    try {
+      print('=== EMAIL LOGIN ===');
+      print('Email: $email, AdminId: $adminId');
+      
+      final response = await postWithoutAuth('/api/user/login', {
+        'email': email,
+        'password': password,
+        'adminId': adminId, // Optional adminId for direct app login
+      });
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        print('Email login successful: ${data['success']}');
+        
+        if (data['success'] == true) {
+          // Store user session for app usage
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('app_user_token', data['token'] ?? '');
+          await prefs.setString('app_user_id', data['user']['id'] ?? data['user']['_id'] ?? '');
+          await prefs.setString('app_user_email', data['user']['email'] ?? '');
+          await prefs.setString('linked_admin_id', data['user']['adminId'] ?? adminId ?? '');
+          
+          return data;
+        } else {
+          throw Exception(data['message'] ?? 'Login failed');
+        }
+      } else {
+        final error = json.decode(response.body);
+        throw Exception(error['message'] ?? 'Login failed');
+      }
+    } catch (e) {
+      print('Email login error: $e');
+      throw Exception('Login failed: $e');
+    }
+  }
+
+  // Get current app user session
+  Future<Map<String, dynamic>?> getCurrentAppUser() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('app_user_token');
+      final userId = prefs.getString('app_user_id');
+      final email = prefs.getString('app_user_email');
+      final adminId = prefs.getString('linked_admin_id');
+      
+      if (token != null && userId != null) {
+        return {
+          'token': token,
+          'id': userId,
+          'email': email,
+          'adminId': adminId,
+        };
+      }
+      return null;
+    } catch (e) {
+      print('Error getting current app user: $e');
+      return null;
+    }
+  }
+
+  // Logout app user
+  Future<void> logoutAppUser() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('app_user_token');
+    await prefs.remove('app_user_id');
+    await prefs.remove('app_user_email');
+    await prefs.remove('linked_admin_id');
+  }
+
   // Login method
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
@@ -989,10 +1060,28 @@ class ApiService {
     try {
       print('Getting form data with adminId: $adminId');
       
+      // If no adminId provided, try to get from current session
+      String? targetAdminId = adminId;
+      if (targetAdminId == null || targetAdminId.isEmpty) {
+        // Try to get from logged-in admin session
+        final adminUserId = await _getUserId();
+        if (adminUserId != null && adminUserId.isNotEmpty) {
+          targetAdminId = adminUserId;
+          print('Using logged-in admin ID: $targetAdminId');
+        } else {
+          // Try to get from app user session
+          final appUser = await getCurrentAppUser();
+          if (appUser != null && appUser['adminId'] != null) {
+            targetAdminId = appUser['adminId'];
+            print('Using linked admin ID from app user: $targetAdminId');
+          }
+        }
+      }
+      
       // Build URL with adminId parameter
       String url = '$baseUrl/api/get-form';
-      if (adminId != null && adminId.isNotEmpty) {
-        url += '?adminId=$adminId';
+      if (targetAdminId != null && targetAdminId.isNotEmpty) {
+        url += '?adminId=$targetAdminId';
       }
       
       final response = await http.get(Uri.parse(url));
@@ -1000,6 +1089,12 @@ class ApiService {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         print('Form data fetched successfully: ${data.keys}');
+        
+        // Validate unique IDs in the response
+        if (data['success'] == true && data['pages'] != null) {
+          _validateUniqueIds(data);
+        }
+        
         return data;
       } else {
         throw Exception('Failed to get form data: ${response.statusCode}');
@@ -1013,6 +1108,49 @@ class ApiService {
         'widgets': [],
         'error': e.toString()
       };
+    }
+  }
+  
+  // Validate unique IDs in form data
+  void _validateUniqueIds(Map<String, dynamic> data) {
+    try {
+      final pages = data['pages'] as List?;
+      if (pages == null) return;
+      
+      Set<String> widgetIds = {};
+      Set<String> pageNames = {};
+      
+      for (var page in pages) {
+        if (page['name'] != null) {
+          final pageName = page['name'].toString();
+          if (pageNames.contains(pageName)) {
+            print('Warning: Duplicate page name found: $pageName');
+          } else {
+            pageNames.add(pageName);
+          }
+        }
+        
+        final widgets = page['widgets'] as List?;
+        if (widgets == null) continue;
+        
+        for (var widget in widgets) {
+          final widgetId = widget['id']?.toString() ?? widget['_id']?.toString();
+          if (widgetId != null) {
+            if (widgetIds.contains(widgetId)) {
+              print('Warning: Duplicate widget ID found: $widgetId');
+              // Generate unique ID if duplicate found
+              widget['id'] = '${widget['name']}_${DateTime.now().millisecondsSinceEpoch}';
+              print('Generated new unique ID: ${widget['id']}');
+            } else {
+              widgetIds.add(widgetId);
+            }
+          }
+        }
+      }
+      
+      print('ID validation completed. Pages: ${pageNames.length}, Widgets: ${widgetIds.length}');
+    } catch (e) {
+      print('Error in ID validation: $e');
     }
   }
 
