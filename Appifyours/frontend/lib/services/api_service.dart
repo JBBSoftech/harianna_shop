@@ -58,11 +58,25 @@ class ApiService {
     return prefs.getString('auth_token');
   }
 
+  // Get current user ID with enhanced logging
   Future<String?> _getUserId() async {
     final prefs = await SharedPreferences.getInstance();
     final userId = prefs.getString('user_id');
     print('Retrieved User ID from storage: $userId');
+    
+    // Also check if we have a valid token
+    final token = prefs.getString('auth_token');
+    print('Retrieved auth token from storage: ${token != null ? "exists" : "null"}');
+    
     return userId;
+  }
+
+  // Clear all cached user data - useful for debugging
+  Future<void> clearUserDataCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
+    await prefs.remove('user_id');
+    print('Cleared user data cache');
   }
 
   Future<List<Map<String, dynamic>>> getAppDetails() async {
@@ -987,19 +1001,28 @@ class ApiService {
   // Get form data for dynamic widget generation
   Future<Map<String, dynamic>> getFormData({String? adminId}) async {
     try {
-      print('Getting form data with adminId: $adminId');
+      // Get current user ID if adminId not provided
+      final userId = adminId ?? await _getUserId();
+      print('Getting form data for User ID: $userId');
       
-      // Build URL with adminId parameter
-      String url = '$baseUrl/api/get-form';
-      if (adminId != null && adminId.isNotEmpty) {
-        url += '?adminId=$adminId';
+      if (userId == null) {
+        print('No user ID found, returning fallback data');
+        return {
+          'success': false,
+          'pages': [],
+          'widgets': [],
+          'error': 'User not authenticated'
+        };
       }
+      
+      // Build URL with userId parameter (backend expects adminId but we send userId)
+      String url = '$baseUrl/api/get-form?adminId=$userId';
       
       final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        print('Form data fetched successfully: ${data.keys}');
+        print('Form data fetched successfully for user $userId: ${data.keys}');
         return data;
       } else {
         throw Exception('Failed to get form data: ${response.statusCode}');
