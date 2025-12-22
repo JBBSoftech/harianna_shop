@@ -64,19 +64,15 @@ class ApiService {
     final userId = prefs.getString('user_id');
     print('Retrieved User ID from storage: $userId');
     
-    // Also check if we have a valid token
+    // Check if we have a valid token to ensure user is authenticated
     final token = prefs.getString('auth_token');
-    print('Retrieved auth token from storage: ${token != null ? "exists" : "null"}');
+    if (token == null) {
+      print('No auth token found, user may not be authenticated');
+      return null;
+    }
     
+    print('User authenticated with token length: ${token.length}');
     return userId;
-  }
-
-  // Clear all cached user data - useful for debugging
-  Future<void> clearUserDataCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
-    await prefs.remove('user_id');
-    print('Cleared user data cache');
   }
 
   Future<List<Map<String, dynamic>>> getAppDetails() async {
