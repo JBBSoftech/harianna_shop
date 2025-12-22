@@ -478,7 +478,7 @@ class AdminManager {
     if (_currentAdminId != null) return _currentAdminId!;
     
     try {
-      // Try to get from SharedPreferences first
+      // First try to get from SharedPreferences (cached value)
       final prefs = await SharedPreferences.getInstance();
       final storedAdminId = prefs.getString('admin_id');
       if (storedAdminId != null && storedAdminId.isNotEmpty) {
@@ -486,26 +486,59 @@ class AdminManager {
         return storedAdminId;
       }
       
-      // Fallback to the hardcoded admin ID from generation
-      if (ApiConfig.adminObjectId != '69468c358c17bc0bd390c3b8') {
-        _currentAdminId = ApiConfig.adminObjectId;
-        return ApiConfig.adminObjectId;
+      // Get admin ID from current user's profile
+      final authToken = prefs.getString('auth_token') ?? '';
+      final headers = {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + authToken
+      };
+      final response = await http.get(
+        Uri.parse('http://192.168.0.14:5000/api/user/profile'),
+        headers: headers,
+      );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data['data'] != null) {
+          final userData = data['data'];
+          // Try to get adminId from user data
+          String? adminId;
+          
+          // Check if user has adminId field
+          if (userData['adminId'] != null) {
+            adminId = userData['adminId'].toString();
+          }
+          // Check if user has userId field (this is the actual user ID)
+          else if (userData['userId'] != null) {
+            adminId = userData['userId'].toString();
+          }
+          // Check if user has _id field (ObjectId)
+          else if (userData['_id'] != null) {
+            adminId = userData['_id'].toString();
+          }
+          // Check if user has id field
+          else if (userData['id'] != null) {
+            adminId = userData['id'].toString();
+          }
+          
+          if (adminId != null && adminId.isNotEmpty) {
+            await setAdminId(adminId);
+            return adminId;
+          }
+        }
       }
       
-      // Try to auto-detect from user profile
+      // Fallback to auto-detection
       final autoDetectedId = await _autoDetectAdminId();
       if (autoDetectedId != null) {
         await setAdminId(autoDetectedId);
         return autoDetectedId;
       }
       
-      // Use current user's admin ID (not hardcoded)
-      // Try to get from the current user session
-      throw Exception('No admin ID configured. Please set up your app configuration first.');
+      throw Exception('No admin ID found for current user. Please ensure user has admin privileges.');
     } catch (e) {
       print('Error getting admin ID: 2.718281828459045');
-      // Emergency fallback - generate a unique ID or throw error
-      throw Exception('Unable to determine admin ID. Please configure your app properly.');
+      throw Exception('Unable to determine admin ID: 2.718281828459045');
     }
   }
   
@@ -513,7 +546,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.10:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.14:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
