@@ -65,6 +65,20 @@ class ApiService {
     return userId;
   }
 
+  Future<String?> _getAdminId() async {
+    final prefs = await SharedPreferences.getInstance();
+    final adminId = prefs.getString('admin_id');
+    print('Retrieved Admin ID from storage: $adminId');
+    return adminId;
+  }
+
+  Future<String?> _getShopName() async {
+    final prefs = await SharedPreferences.getInstance();
+    final shopName = prefs.getString('shop_name');
+    print('Retrieved Shop Name from storage: $shopName');
+    return shopName;
+  }
+
   Future<List<Map<String, dynamic>>> getAppDetails() async {
     try {
       final response = await get('/api/user/app-details');
@@ -433,81 +447,10 @@ class ApiService {
     }
   }
 
-  // Email login for app users
-  Future<Map<String, dynamic>> emailLogin(String email, String password, {String? adminId}) async {
-    try {
-      print('=== EMAIL LOGIN ===');
-      print('Email: $email, AdminId: $adminId');
-      
-      final response = await postWithoutAuth('/api/user/login', {
-        'email': email,
-        'password': password,
-        'adminId': adminId, // Optional adminId for direct app login
-      });
-
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        print('Email login successful: ${data['success']}');
-        
-        if (data['success'] == true) {
-          // Store user session for app usage
-          final prefs = await SharedPreferences.getInstance();
-          await prefs.setString('app_user_token', data['token'] ?? '');
-          await prefs.setString('app_user_id', data['user']['id'] ?? data['user']['_id'] ?? '');
-          await prefs.setString('app_user_email', data['user']['email'] ?? '');
-          await prefs.setString('linked_admin_id', data['user']['adminId'] ?? adminId ?? '');
-          
-          return data;
-        } else {
-          throw Exception(data['message'] ?? 'Login failed');
-        }
-      } else {
-        final error = json.decode(response.body);
-        throw Exception(error['message'] ?? 'Login failed');
-      }
-    } catch (e) {
-      print('Email login error: $e');
-      throw Exception('Login failed: $e');
-    }
-  }
-
-  // Get current app user session
-  Future<Map<String, dynamic>?> getCurrentAppUser() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('app_user_token');
-      final userId = prefs.getString('app_user_id');
-      final email = prefs.getString('app_user_email');
-      final adminId = prefs.getString('linked_admin_id');
-      
-      if (token != null && userId != null) {
-        return {
-          'token': token,
-          'id': userId,
-          'email': email,
-          'adminId': adminId,
-        };
-      }
-      return null;
-    } catch (e) {
-      print('Error getting current app user: $e');
-      return null;
-    }
-  }
-
-  // Logout app user
-  Future<void> logoutAppUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('app_user_token');
-    await prefs.remove('app_user_id');
-    await prefs.remove('app_user_email');
-    await prefs.remove('linked_admin_id');
-  }
-
-  // Login method
+  // Login method with admin linking
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
-      final response = await postWithoutAuth('/api/signin', {
+      final response = await postWithoutAuth('/api/login', {
         'username': email,
         'password': password,
       });
@@ -517,8 +460,27 @@ class ApiService {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('auth_token', data['token']);
-        await prefs.setString('user_id', data['user']['_id'] ?? data['user']['id']);
+        
+        // Store user IDs and admin linking information
+        final userId = data['user']['_id'] ?? data['user']['id'] ?? data['user']['userId'];
+        final adminId = data['user']['adminId'];
+        final shopName = data['user']['shopName'];
+        
+        await prefs.setString('user_id', userId);
+        
+        // Store adminId if available
+        if (adminId != null && adminId.isNotEmpty) {
+          await prefs.setString('admin_id', adminId);
+          print('Stored adminId: $adminId');
+        }
+        
+        // Store shopName if available
+        if (shopName != null && shopName.isNotEmpty) {
+          await prefs.setString('shop_name', shopName);
+          print('Stored shopName: $shopName');
+        }
 
+        print('Login successful - User ID: $userId, Admin ID: $adminId, Shop: $shopName');
         return data;
       } else {
         final error = json.decode(response.body);
@@ -568,6 +530,8 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_id');
+    await prefs.remove('admin_id'); // Clear admin ID
+    await prefs.remove('shop_name'); // Clear shop name
   }
 
   // Handle 401 Unauthorized errors
@@ -1026,16 +990,18 @@ class ApiService {
 
   // ===== NEW METHODS FOR DYNAMIC FEATURES =====
 
-  // Get app name for splash screen
-  Future<Map<String, dynamic>> getAppName({String? adminId}) async {
+  // Get app name for splash screen (uses stored adminId)
+  Future<Map<String, dynamic>> getAppName() async {
     try {
+      final adminId = await _getAdminId();
       print('Getting app name with adminId: $adminId');
       
-      // Build URL with adminId parameter
-      String url = '$baseUrl/api/admin/splash';
-      if (adminId != null && adminId.isNotEmpty) {
-        url += '?adminId=$adminId';
+      if (adminId == null || adminId.isEmpty) {
+        throw Exception('No admin ID found - please login again');
       }
+      
+      // Build URL with adminId parameter
+      String url = '$baseUrl/api/admin/splash?adminId=$adminId';
       
       final response = await http.get(Uri.parse(url));
       
@@ -1046,121 +1012,53 @@ class ApiService {
       }
     } catch (e) {
       print('Error getting app name: $e');
-      // Return fallback data
-      return {
-        'adminId': adminId ?? '',
-        'appName': 'MyApp',
-        'shopName': 'Default Shop'
-      };
+      throw Exception('Failed to get app name: $e');
     }
   }
 
-  // Get form data for dynamic widget generation
-  Future<Map<String, dynamic>> getFormData({String? adminId}) async {
+  // Get form data for dynamic widget generation (uses stored adminId)
+  Future<Map<String, dynamic>> getFormData() async {
     try {
+      final adminId = await _getAdminId();
       print('Getting form data with adminId: $adminId');
       
-      // If no adminId provided, try to get from current session
-      String? targetAdminId = adminId;
-      if (targetAdminId == null || targetAdminId.isEmpty) {
-        // Try to get from logged-in admin session
-        final adminUserId = await _getUserId();
-        if (adminUserId != null && adminUserId.isNotEmpty) {
-          targetAdminId = adminUserId;
-          print('Using logged-in admin ID: $targetAdminId');
-        } else {
-          // Try to get from app user session
-          final appUser = await getCurrentAppUser();
-          if (appUser != null && appUser['adminId'] != null) {
-            targetAdminId = appUser['adminId'];
-            print('Using linked admin ID from app user: $targetAdminId');
-          }
-        }
+      if (adminId == null || adminId.isEmpty) {
+        throw Exception('No admin ID found - please login again');
       }
       
       // Build URL with adminId parameter
-      String url = '$baseUrl/api/get-form';
-      if (targetAdminId != null && targetAdminId.isNotEmpty) {
-        url += '?adminId=$targetAdminId';
-      }
+      String url = '$baseUrl/api/get-form?adminId=$adminId';
       
       final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         print('Form data fetched successfully: ${data.keys}');
-        
-        // Validate unique IDs in the response
-        if (data['success'] == true && data['pages'] != null) {
-          _validateUniqueIds(data);
-        }
-        
         return data;
       } else {
         throw Exception('Failed to get form data: ${response.statusCode}');
       }
     } catch (e) {
       print('Error getting form data: $e');
-      // Return fallback data
-      return {
-        'success': false,
-        'pages': [],
-        'widgets': [],
-        'error': e.toString()
-      };
-    }
-  }
-  
-  // Validate unique IDs in form data
-  void _validateUniqueIds(Map<String, dynamic> data) {
-    try {
-      final pages = data['pages'] as List?;
-      if (pages == null) return;
-      
-      Set<String> widgetIds = {};
-      Set<String> pageNames = {};
-      
-      for (var page in pages) {
-        if (page['name'] != null) {
-          final pageName = page['name'].toString();
-          if (pageNames.contains(pageName)) {
-            print('Warning: Duplicate page name found: $pageName');
-          } else {
-            pageNames.add(pageName);
-          }
-        }
-        
-        final widgets = page['widgets'] as List?;
-        if (widgets == null) continue;
-        
-        for (var widget in widgets) {
-          final widgetId = widget['id']?.toString() ?? widget['_id']?.toString();
-          if (widgetId != null) {
-            if (widgetIds.contains(widgetId)) {
-              print('Warning: Duplicate widget ID found: $widgetId');
-              // Generate unique ID if duplicate found
-              widget['id'] = '${widget['name']}_${DateTime.now().millisecondsSinceEpoch}';
-              print('Generated new unique ID: ${widget['id']}');
-            } else {
-              widgetIds.add(widgetId);
-            }
-          }
-        }
-      }
-      
-      print('ID validation completed. Pages: ${pageNames.length}, Widgets: ${widgetIds.length}');
-    } catch (e) {
-      print('Error in ID validation: $e');
+      throw Exception('Failed to get form data: $e');
     }
   }
 
-  // Get app info for admin-user linking
+  // Get app info for admin-user linking (uses stored adminId)
   Future<Map<String, dynamic>> getAppInfo() async {
     try {
-      print('Getting app info - using baseUrl: $baseUrl');
+      final adminId = await _getAdminId();
+      print('Getting app info for adminId: $adminId - using baseUrl: $baseUrl');
+      
+      if (adminId == null || adminId.isEmpty) {
+        throw Exception('No admin ID found - please login again');
+      }
+      
+      // Build URL with adminId parameter
+      String url = '$baseUrl/api/admin/app-info?adminId=$adminId';
       
       final response = await http.get(
-        Uri.parse('$baseUrl/api/admin/app-info'),
+        Uri.parse(url),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -1178,33 +1076,54 @@ class ApiService {
         };
       } else {
         print('App info request failed with status: ${response.statusCode}');
-        return {
-          'success': false,
-          'data': {
-            'adminId': '', // No hardcoded fallback
-            'appName': 'MyApp',
-            'company': 'Appifyours',
-            'version': '1.0.0'
-          }, // Fallback
-          'statusCode': response.statusCode,
-        };
+        throw Exception('Failed to get app info: ${response.statusCode}');
       }
     } catch (e) {
       print('Error getting app info: $e');
-      return {
-        'success': false,
-        'data': {
-          'adminId': '', // No hardcoded fallback
-          'appName': 'MyApp',
-          'company': 'Appifyours',
-          'version': '1.0.0'
-        }, // Fallback
-        'statusCode': 500,
-      };
+      throw Exception('Failed to get app info: $e');
     }
   }
 
-  // Enhanced signup with admin and shop linking
+  // Get admin-specific app configuration
+  Future<Map<String, dynamic>> getAdminAppConfig(String adminId) async {
+    try {
+      print('Getting admin app config for adminId: $adminId');
+      
+      final response = await get('/api/app/dynamic/$adminId');
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true) {
+          return data['config'];
+        } else {
+          throw Exception(data['message'] ?? 'Failed to get admin config');
+        }
+      } else {
+        throw Exception('Failed to get admin config: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error getting admin app config: $e');
+      throw Exception('Failed to get admin app config: $e');
+    }
+  }
+
+  // Get current admin's configuration using logged-in user's ID
+  Future<Map<String, dynamic>> getCurrentAdminConfig() async {
+    try {
+      final userId = await _getUserId();
+      if (userId == null) {
+        throw Exception('No user ID found - user not logged in');
+      }
+      
+      print('Getting current admin config for userId: $userId');
+      return await getAdminAppConfig(userId);
+    } catch (e) {
+      print('Error getting current admin config: $e');
+      throw Exception('Failed to get current admin config: $e');
+    }
+  }
+
+  // ===== NEW METHODS FOR DYNAMIC FEATURES =====
   Future<Map<String, dynamic>> dynamicSignupWithAdmin({
     required String firstName,
     required String lastName,
