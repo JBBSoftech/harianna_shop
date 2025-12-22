@@ -65,20 +65,6 @@ class ApiService {
     return userId;
   }
 
-  Future<String?> _getAdminId() async {
-    final prefs = await SharedPreferences.getInstance();
-    final adminId = prefs.getString('admin_id');
-    print('Retrieved Admin ID from storage: $adminId');
-    return adminId;
-  }
-
-  Future<String?> _getShopName() async {
-    final prefs = await SharedPreferences.getInstance();
-    final shopName = prefs.getString('shop_name');
-    print('Retrieved Shop Name from storage: $shopName');
-    return shopName;
-  }
-
   Future<List<Map<String, dynamic>>> getAppDetails() async {
     try {
       final response = await get('/api/user/app-details');
@@ -447,10 +433,10 @@ class ApiService {
     }
   }
 
-  // Login method with admin linking
+  // Login method
   Future<Map<String, dynamic>> login(String email, String password) async {
     try {
-      final response = await postWithoutAuth('/api/login', {
+      final response = await postWithoutAuth('/api/signin', {
         'username': email,
         'password': password,
       });
@@ -460,27 +446,8 @@ class ApiService {
 
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('auth_token', data['token']);
-        
-        // Store user IDs and admin linking information
-        final userId = data['user']['_id'] ?? data['user']['id'] ?? data['user']['userId'];
-        final adminId = data['user']['adminId'];
-        final shopName = data['user']['shopName'];
-        
-        await prefs.setString('user_id', userId);
-        
-        // Store adminId if available
-        if (adminId != null && adminId.isNotEmpty) {
-          await prefs.setString('admin_id', adminId);
-          print('Stored adminId: $adminId');
-        }
-        
-        // Store shopName if available
-        if (shopName != null && shopName.isNotEmpty) {
-          await prefs.setString('shop_name', shopName);
-          print('Stored shopName: $shopName');
-        }
+        await prefs.setString('user_id', data['user']['_id'] ?? data['user']['id']);
 
-        print('Login successful - User ID: $userId, Admin ID: $adminId, Shop: $shopName');
         return data;
       } else {
         final error = json.decode(response.body);
@@ -530,8 +497,6 @@ class ApiService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
     await prefs.remove('user_id');
-    await prefs.remove('admin_id'); // Clear admin ID
-    await prefs.remove('shop_name'); // Clear shop name
   }
 
   // Handle 401 Unauthorized errors
@@ -990,18 +955,16 @@ class ApiService {
 
   // ===== NEW METHODS FOR DYNAMIC FEATURES =====
 
-  // Get app name for splash screen (uses stored adminId)
-  Future<Map<String, dynamic>> getAppName() async {
+  // Get app name for splash screen
+  Future<Map<String, dynamic>> getAppName({String? adminId}) async {
     try {
-      final adminId = await _getAdminId();
       print('Getting app name with adminId: $adminId');
       
-      if (adminId == null || adminId.isEmpty) {
-        throw Exception('No admin ID found - please login again');
-      }
-      
       // Build URL with adminId parameter
-      String url = '$baseUrl/api/admin/splash?adminId=$adminId';
+      String url = '$baseUrl/api/admin/splash';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
+      }
       
       final response = await http.get(Uri.parse(url));
       
@@ -1012,22 +975,25 @@ class ApiService {
       }
     } catch (e) {
       print('Error getting app name: $e');
-      throw Exception('Failed to get app name: $e');
+      // Return fallback data
+      return {
+        'adminId': adminId ?? '',
+        'appName': 'MyApp',
+        'shopName': 'Default Shop'
+      };
     }
   }
 
-  // Get form data for dynamic widget generation (uses stored adminId)
-  Future<Map<String, dynamic>> getFormData() async {
+  // Get form data for dynamic widget generation
+  Future<Map<String, dynamic>> getFormData({String? adminId}) async {
     try {
-      final adminId = await _getAdminId();
       print('Getting form data with adminId: $adminId');
       
-      if (adminId == null || adminId.isEmpty) {
-        throw Exception('No admin ID found - please login again');
-      }
-      
       // Build URL with adminId parameter
-      String url = '$baseUrl/api/get-form?adminId=$adminId';
+      String url = '$baseUrl/api/get-form';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
+      }
       
       final response = await http.get(Uri.parse(url));
       
@@ -1040,90 +1006,123 @@ class ApiService {
       }
     } catch (e) {
       print('Error getting form data: $e');
-      throw Exception('Failed to get form data: $e');
+      // Return fallback data
+      return {
+        'success': false,
+        'pages': [],
+        'widgets': [],
+        'error': e.toString()
+      };
     }
   }
 
-  // Get app info for admin-user linking (uses stored adminId)
-  Future<Map<String, dynamic>> getAppInfo() async {
+  // Get app info for admin-user linking
+  Future<Map<String, dynamic>> getAppInfo({bool clearCache = false}) async {
     try {
-      final adminId = await _getAdminId();
-      print('Getting app info for adminId: $adminId - using baseUrl: $baseUrl');
+      print('Getting app info - using baseUrl: $baseUrl');
       
-      if (adminId == null || adminId.isEmpty) {
-        throw Exception('No admin ID found - please login again');
+      // Get JWT token
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
+      
+      // Clear cache if requested
+      if (clearCache) {
+        await prefs.remove('cached_app_info');
+        await prefs.remove('cached_app_info_timestamp');
+        print('App info cache cleared');
       }
       
-      // Build URL with adminId parameter
-      String url = '$baseUrl/api/admin/app-info?adminId=$adminId';
+      // Check cache first (if not clearing)
+      if (!clearCache) {
+        final cachedData = prefs.getString('cached_app_info');
+        final cachedTimestamp = prefs.getInt('cached_app_info_timestamp');
+        
+        if (cachedData != null && cachedTimestamp != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTimestamp;
+          // Use cache if it's less than 5 minutes old
+          if (cacheAge < 5 * 60 * 1000) {
+            print('Using cached app info (${(cacheAge / 1000).toInt()} seconds old)');
+            return json.decode(cachedData);
+          } else {
+            print('App info cache expired, clearing...');
+            await prefs.remove('cached_app_info');
+            await prefs.remove('cached_app_info_timestamp');
+          }
+        }
+      }
+      
+      final headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add authorization header if token exists
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+        print('Adding JWT token to app info request');
+      }
       
       final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        Uri.parse('$baseUrl/api/admin/app-info'),
+        headers: headers,
       );
 
       print('App info response status: ${response.statusCode}');
       print('App info response body: ${response.body}');
 
+      Map<String, dynamic> result;
+      
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return {
+        result = {
           'success': true,
           'data': data,
           'statusCode': response.statusCode,
         };
+        
+        // Cache the successful response
+        await prefs.setString('cached_app_info', json.encode(result));
+        await prefs.setInt('cached_app_info_timestamp', DateTime.now().millisecondsSinceEpoch);
+        print('App info cached successfully');
+        
       } else {
         print('App info request failed with status: ${response.statusCode}');
-        throw Exception('Failed to get app info: ${response.statusCode}');
+        result = {
+          'success': false,
+          'data': {
+            'adminId': '', // No hardcoded fallback
+            'appName': 'MyApp',
+            'company': 'Appifyours',
+            'version': '1.0.0'
+          }, // Fallback
+          'statusCode': response.statusCode,
+        };
       }
+      
+      return result;
     } catch (e) {
       print('Error getting app info: $e');
-      throw Exception('Failed to get app info: $e');
+      return {
+        'success': false,
+        'data': {
+          'adminId': '', // No hardcoded fallback
+          'appName': 'MyApp',
+          'company': 'Appifyours',
+          'version': '1.0.0'
+        }, // Fallback
+        'statusCode': 500,
+      };
     }
   }
 
-  // Get admin-specific app configuration
-  Future<Map<String, dynamic>> getAdminAppConfig(String adminId) async {
-    try {
-      print('Getting admin app config for adminId: $adminId');
-      
-      final response = await get('/api/app/dynamic/$adminId');
-      
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true) {
-          return data['config'];
-        } else {
-          throw Exception(data['message'] ?? 'Failed to get admin config');
-        }
-      } else {
-        throw Exception('Failed to get admin config: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('Error getting admin app config: $e');
-      throw Exception('Failed to get admin app config: $e');
-    }
+  // Clear app info cache
+  Future<void> clearAppInfoCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cached_app_info');
+    await prefs.remove('cached_app_info_timestamp');
+    print('App info cache cleared manually');
   }
 
-  // Get current admin's configuration using logged-in user's ID
-  Future<Map<String, dynamic>> getCurrentAdminConfig() async {
-    try {
-      final userId = await _getUserId();
-      if (userId == null) {
-        throw Exception('No user ID found - user not logged in');
-      }
-      
-      print('Getting current admin config for userId: $userId');
-      return await getAdminAppConfig(userId);
-    } catch (e) {
-      print('Error getting current admin config: $e');
-      throw Exception('Failed to get current admin config: $e');
-    }
-  }
-
-  // ===== NEW METHODS FOR DYNAMIC FEATURES =====
+  // Enhanced signup with admin and shop linking
   Future<Map<String, dynamic>> dynamicSignupWithAdmin({
     required String firstName,
     required String lastName,
@@ -1458,10 +1457,23 @@ class ApiService {
   // Get dynamic app configuration
   Future<Map<String, dynamic>> getDynamicAppConfig() async {
     try {
+      final token = await _getToken();
+      final userId = await _getUserId();
+
+      if (token == null || token.isEmpty) {
+        throw Exception('No authentication token found');
+      }
+      if (userId == null || userId.isEmpty) {
+        throw Exception('No user id found in local storage');
+      }
+
+      // IMPORTANT: Fetch config scoped to the logged-in user only
+      // Do NOT use the generic /api/app/config endpoint since it returns a default/global config.
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/config'),
+        Uri.parse('$baseUrl/api/app/dynamic/$userId'),
         headers: {
           'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
         },
       );
 
