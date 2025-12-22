@@ -1023,7 +1023,7 @@ class ApiService {
       
       // Get JWT token
       final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('token');
+      final token = prefs.getString('auth_token');
       
       // Clear cache if requested
       if (clearCache) {
@@ -1072,10 +1072,11 @@ class ApiService {
       Map<String, dynamic> result;
       
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
+        final decoded = json.decode(response.body);
+        final appInfo = (decoded is Map<String, dynamic>) ? (decoded['data'] ?? decoded) : decoded;
         result = {
           'success': true,
-          'data': data,
+          'data': appInfo,
           'statusCode': response.statusCode,
         };
         
