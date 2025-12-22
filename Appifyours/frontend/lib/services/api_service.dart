@@ -448,16 +448,6 @@ class ApiService {
         await prefs.setString('auth_token', data['token']);
         await prefs.setString('user_id', data['user']['_id'] ?? data['user']['id']);
 
-        // Store logical admin identifier (adminKey) as the user's email.
-        // This will be used by the dynamic UI to load the correct admin configuration.
-        final String? emailFromResponse = data['user']['email'];
-        if (emailFromResponse != null && emailFromResponse.isNotEmpty) {
-          await prefs.setString('admin_id', emailFromResponse);
-        } else {
-          // Fallback to the email used for login if backend does not echo it.
-          await prefs.setString('admin_id', email);
-        }
-
         return data;
       } else {
         final error = json.decode(response.body);
