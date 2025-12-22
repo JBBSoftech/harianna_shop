@@ -957,18 +957,13 @@ class ApiService {
 
   // Get app name for splash screen
   Future<Map<String, dynamic>> getAppName({String? adminId}) async {
-    String? resolvedUserId;
     try {
-      // Determine userId: prefer provided, else stored
-      final String? userId = adminId ?? await _getUserId();
-      resolvedUserId = userId;
+      print('Getting app name with adminId: $adminId');
       
-      print('Getting app name with userId: $userId');
-      
-      // Build URL with userId parameter
+      // Build URL with adminId parameter
       String url = '$baseUrl/api/admin/splash';
-      if (userId != null && userId.isNotEmpty) {
-        url += '?userId=$userId';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
       }
       
       final response = await http.get(Uri.parse(url));
@@ -982,7 +977,7 @@ class ApiService {
       print('Error getting app name: $e');
       // Return fallback data
       return {
-        'userId': resolvedUserId ?? '',
+        'adminId': adminId ?? '',
         'appName': 'MyApp',
         'shopName': 'Default Shop'
       };
@@ -991,18 +986,13 @@ class ApiService {
 
   // Get form data for dynamic widget generation
   Future<Map<String, dynamic>> getFormData({String? adminId}) async {
-    String? resolvedUserId;
     try {
-      // Determine userId: param or stored
-      final String? userId = adminId ?? await _getUserId();
-      resolvedUserId = userId;
+      print('Getting form data with adminId: $adminId');
       
-      print('Getting form data with userId: $userId');
-      
-      // Build URL with userId parameter
+      // Build URL with adminId parameter
       String url = '$baseUrl/api/get-form';
-      if (userId != null && userId.isNotEmpty) {
-        url += '?userId=$userId';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
       }
       
       final response = await http.get(Uri.parse(url));
@@ -1053,7 +1043,7 @@ class ApiService {
         return {
           'success': false,
           'data': {
-            'userId': '', // No hardcoded fallback
+            'adminId': '', // No hardcoded fallback
             'appName': 'MyApp',
             'company': 'Appifyours',
             'version': '1.0.0'
@@ -1066,7 +1056,7 @@ class ApiService {
       return {
         'success': false,
         'data': {
-          'userId': '', // No hardcoded fallback
+          'adminId': '', // No hardcoded fallback
           'appName': 'MyApp',
           'company': 'Appifyours',
           'version': '1.0.0'
@@ -1083,23 +1073,23 @@ class ApiService {
     required String email,
     required String password,
     String? phone,
-    String? userId,
+    String? adminId,
     String? shopName,
   }) async {
     try {
       print('Dynamic signup with admin and shop - using baseUrl: $baseUrl');
       
       // First get app info to determine admin ID and shop name if not provided
-      String linkedUserId = userId ?? '';
+      String linkedAdminId = adminId ?? '';
       String linkedShopName = shopName ?? '';
       
-      if (linkedUserId.isEmpty || linkedShopName.isEmpty) {
+      if (linkedAdminId.isEmpty || linkedShopName.isEmpty) {
         final appInfoResult = await getAppInfo();
         if (appInfoResult['success'] == true && appInfoResult['data'] != null) {
-          linkedUserId = linkedUserId.isEmpty ? (appInfoResult['data']['userId'] ?? '') : linkedUserId;
+          linkedAdminId = linkedAdminId.isEmpty ? (appInfoResult['data']['adminId'] ?? '') : linkedAdminId;
           linkedShopName = linkedShopName.isEmpty ? (appInfoResult['data']['shopName'] ?? 'Default Shop') : linkedShopName;
         } else {
-          linkedUserId = linkedUserId.isEmpty ? '' : linkedUserId; // No hardcoded fallback
+          linkedAdminId = linkedAdminId.isEmpty ? '' : linkedAdminId; // No hardcoded fallback
           linkedShopName = linkedShopName.isEmpty ? 'Default Shop' : linkedShopName;
         }
       }
@@ -1115,7 +1105,7 @@ class ApiService {
           'email': email,
           'password': password,
           'phone': phone ?? '',
-          'userId': linkedUserId,
+          'adminId': linkedAdminId,
           'shopName': linkedShopName,
         }),
       );
@@ -1152,18 +1142,13 @@ class ApiService {
 
   // Get home page widgets for dynamic app
   Future<Map<String, dynamic>> getHomeWidgets({String? adminId}) async {
-    String? resolvedUserId;
     try {
-      // Determine userId
-      final String? userId = adminId ?? await _getUserId();
-      resolvedUserId = userId;
+      print('Getting home widgets with adminId: $adminId');
       
-      print('Getting home widgets with userId: $userId');
-      
-      // Build URL with userId parameter
+      // Build URL with adminId parameter
       String url = '$baseUrl/api/admin/home';
-      if (userId != null && userId.isNotEmpty) {
-        url += '?userId=$userId';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
       }
       
       final response = await http.get(Uri.parse(url));
@@ -1534,13 +1519,13 @@ class ApiService {
       
       // Join admin-specific room for targeted updates
       if (adminId != null && adminId.isNotEmpty) {
-        _socket!.emit('join-admin-room', {'userId': adminId});
+        _socket!.emit('join-admin-room', {'adminId': adminId});
         print('📱 Joined admin room: admin-$adminId');
       }
       
       // Test connection
       _socket!.emit('test-connection', {
-        'userId': adminId ?? 'default',
+        'adminId': adminId ?? 'default',
         'timestamp': DateTime.now().toIso8601String(),
       });
     });
@@ -1694,7 +1679,7 @@ class ApiService {
           'Content-Type': 'application/json',
         },
         body: json.encode({
-          'userId': adminId,
+          'adminId': adminId,
           'appName': appName ?? 'TestApp',
           'testMessage': testMessage ?? 'Testing real-time connection'
         }),
