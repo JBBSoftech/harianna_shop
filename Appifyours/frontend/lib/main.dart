@@ -513,7 +513,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://10.226.252.5:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.6:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -1070,6 +1070,65 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _homeWidgets = [];
   Map<String, dynamic> _dynamicStoreInfo = {};
   Map<String, dynamic> _dynamicDesignSettings = {};
+  Timer? _dynamicRefreshTimer;
+  bool _isFetchingDynamicConfig = false;
+
+  Map<String, dynamic> _normalizeProduct(Map<String, dynamic> raw, int index) {
+    final Map<String, dynamic> p = Map<String, dynamic>.from(raw);
+
+    // Normalize ID
+    p['id'] = (p['id'] ?? p['_id'] ?? p['productId'] ?? ('product_' + index.toString())).toString();
+
+    // Normalize name
+    p['productName'] = (p['productName'] ?? p['name'] ?? p['title'] ?? 'Product').toString();
+
+    // Normalize image field (support base64 and URL)
+    final dynamic imageCandidate = p['imageAsset'] ?? p['image'] ?? p['imageUrl'] ?? p['imageURL'] ?? p['productImage'] ?? p['thumbnail'] ?? p['photo'];
+    if (imageCandidate != null) {
+      p['imageAsset'] = imageCandidate.toString();
+    }
+
+    // Normalize currency
+    final String currencyCode = (p['currencyCode'] ?? p['currency'] ?? p['currency_code'] ?? '').toString();
+    if (currencyCode.isNotEmpty) {
+      p['currencyCode'] = currencyCode;
+    }
+
+    final String currencySymbol = (p['currencySymbol'] ?? p['currency_symbol'] ?? '').toString();
+    if (currencySymbol.isNotEmpty) {
+      p['currencySymbol'] = currencySymbol;
+    }
+
+    // Normalize price (try multiple keys)
+    final dynamic priceCandidate = p['price'] ?? p['productPrice'] ?? p['currentPrice'] ?? p['basePrice'] ?? p['salePrice'] ?? p['mrp'] ?? p['amount'];
+    if (priceCandidate != null) {
+      p['price'] = priceCandidate.toString();
+    } else {
+      p['price'] = (p['price'] ?? '').toString();
+    }
+
+    // Normalize discount fields
+    final dynamic discountPriceCandidate = p['discountPrice'] ?? p['discountedPrice'] ?? p['offerPrice'] ?? p['finalPrice'];
+    if (discountPriceCandidate != null) {
+      p['discountPrice'] = discountPriceCandidate.toString();
+    }
+
+    // Sometimes discount percent comes as number/string.
+    if (p['discountPercent'] == null && p['discountPercentage'] != null) {
+      p['discountPercent'] = p['discountPercentage'];
+    }
+
+    // Normalize quantity / stock
+    if (p['quantity'] == null && p['stock'] != null) {
+      p['quantity'] = p['stock'];
+    }
+
+    return p;
+  }
+
+  String _resolveSliderImage(Map<String, dynamic> imageData) {
+    return (imageData['imageAsset'] ?? imageData['image'] ?? imageData['imageUrl'] ?? imageData['url'] ?? '').toString();
+  }
 
   @override
   void initState() {
@@ -1078,11 +1137,20 @@ class _HomePageState extends State<HomePage> {
     _dynamicProductCards = List.from(productCards); // Fallback to static data
     _filteredProducts = List.from(_dynamicProductCards);
     _loadDynamicData();
+
+    // Auto-refresh dynamic configuration so changes done in AppBuilder reflect
+    // on the already-built APK without rebuilding.
+    _dynamicRefreshTimer?.cancel();
+    _dynamicRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!mounted) return;
+      await _loadDynamicAppConfig();
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _dynamicRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -1099,20 +1167,27 @@ class _HomePageState extends State<HomePage> {
   // Load dynamic data from backend
   Future<void> _loadDynamicAppConfig() async {
     try {
-      // Get dynamic admin ID
-      final adminId = await AdminManager.getCurrentAdminId();
-      print('🔍 Home page using admin ID: ${adminId}');
-      
-      final response = await http.get(
-        Uri.parse('${Environment.apiBase}/api/app/dynamic/${adminId}'),
-        headers: {'Content-Type': 'application/json'},
-      );
+      if (_isFetchingDynamicConfig) return;
+      _isFetchingDynamicConfig = true;
 
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        if (data['success'] == true && data['config'] != null) {
-          final config = data['config'];
-          final newProducts = List<Map<String, dynamic>>.from(config['productCards'] ?? []);
+      // Always load config scoped to the authenticated user.
+      // This prevents showing another user's app data and ensures price/image are truly dynamic.
+      final apiService = ApiService();
+      final result = await apiService.getDynamicAppConfig();
+
+      if (result['success'] == true) {
+        final data = (result['data'] is Map)
+            ? Map<String, dynamic>.from(result['data'])
+            : <String, dynamic>{};
+        final config = (data['config'] is Map)
+            ? Map<String, dynamic>.from(data['config'])
+            : <String, dynamic>{};
+
+        if (config.isNotEmpty) {
+          final rawProducts = (config['productCards'] is List)
+              ? List<Map<String, dynamic>>.from(config['productCards'])
+              : <Map<String, dynamic>>[];
+          final newProducts = rawProducts.asMap().entries.map((e) => _normalizeProduct(e.value, e.key)).toList();
           final pages = (config['pages'] is List) ? List.from(config['pages']) : <dynamic>[];
 
           // Extract widgets from first page (Home)
@@ -1131,20 +1206,25 @@ class _HomePageState extends State<HomePage> {
           });
 
           final storeInfo = (config['storeInfo'] is Map) ? Map<String, dynamic>.from(config['storeInfo']) : <String, dynamic>{};
+          final designSettings = (config['designSettings'] is Map)
+              ? Map<String, dynamic>.from(config['designSettings'])
+              : <String, dynamic>{};
 
           setState(() {
             _dynamicProductCards = newProducts.isNotEmpty ? newProducts : productCards;
             _filterProducts(_searchQuery); // Re-apply current filter
             _homeWidgets = extractedWidgets;
             _dynamicStoreInfo = storeInfo;
+            _dynamicDesignSettings = designSettings;
             _isLoading = false;
           });
           print('✅ Loaded ${_dynamicProductCards.length} products from backend');
         }
-      }
     } catch (e) {
       print('❌ Error loading dynamic data: $e');
       setState(() => _isLoading = false);
+    } finally {
+      _isFetchingDynamicConfig = false;
     }
   }
 
@@ -1691,6 +1771,11 @@ class _HomePageState extends State<HomePage> {
                         items: sliderImages.map((imageData) {
                           return Builder(
                             builder: (BuildContext context) {
+                              final String resolvedImage = _resolveSliderImage(
+                                (imageData is Map)
+                                    ? Map<String, dynamic>.from(imageData)
+                                    : <String, dynamic>{},
+                              );
                               return Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 5.0),
                                 decoration: BoxDecoration(
@@ -1701,16 +1786,16 @@ class _HomePageState extends State<HomePage> {
                                   children: [
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(borderRadius),
-                                      child: imageData['imageAsset']?.isNotEmpty == true
-                                          ? imageData['imageAsset'].toString().startsWith('data:image/')
+                                      child: resolvedImage.isNotEmpty
+                                          ? resolvedImage.startsWith('data:image/')
                                               ? Image.memory(
-                                                  base64Decode(imageData['imageAsset'].toString().split(',')[1]),
+                                                  base64Decode(resolvedImage.split(',')[1]),
                                                   width: double.infinity,
                                                   height: height,
                                                   fit: BoxFit.cover,
                                                 )
                                               : Image.network(
-                                                  imageData['imageAsset'].toString(),
+                                                  resolvedImage,
                                                   width: double.infinity,
                                                   height: height,
                                                   fit: BoxFit.cover,
@@ -3077,16 +3162,16 @@ class _HomePageState extends State<HomePage> {
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_cartManager.items.length}'),
-            isLabelVisible: _cartManager.items.length > 0,
+            label: Text('${_cartNotificationCount}'),
+            isLabelVisible: _cartNotificationCount > 0,
             child: const Icon(Icons.shopping_cart),
           ),
           label: 'Cart',
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_wishlistManager.items.length}'),
-            isLabelVisible: _wishlistManager.items.length > 0,
+            label: Text('${_wishlistNotificationCount}'),
+            isLabelVisible: _wishlistNotificationCount > 0,
             child: const Icon(Icons.favorite),
           ),
           label: 'Wishlist',
