@@ -7,7 +7,7 @@ void main() {
     // Build our app and trigger a frame.
     await tester.pumpWidget(const MyApp());
 
-    // Verify that app builds without errors
+    // Verify that the app builds without errors
     expect(find.byType(MaterialApp), findsOneWidget);
   });
 }
