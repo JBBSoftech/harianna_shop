@@ -467,7 +467,7 @@ class MyApp extends StatelessWidget {
 // API Configuration - Auto-updated with your server details
 class ApiConfig {
   static String get baseUrl => Environment.apiBase;
-  static const String adminObjectId = '69468c358c17bc0bd390c3b8'; // Will be replaced during publish
+  static const String adminObjectId = '694a980406355a859f159cca'; // Will be replaced during publish
 }
 
 // Dynamic Admin ID Detection
@@ -487,7 +487,7 @@ class AdminManager {
       }
       
       // Fallback to the hardcoded admin ID from generation
-      if (ApiConfig.adminObjectId != '69468c358c17bc0bd390c3b8') {
+      if (ApiConfig.adminObjectId != '694a980406355a859f159cca') {
         _currentAdminId = ApiConfig.adminObjectId;
         return ApiConfig.adminObjectId;
       }
