@@ -959,19 +959,6 @@ class ApiService {
   Future<Map<String, dynamic>> getAppName({String? adminId}) async {
     try {
       print('Getting app name with adminId: $adminId');
-
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
-
-      // If we are not authenticated yet and no adminId is provided,
-      // do not call the backend (it will reject with 400/401).
-      if ((token == null || token.isEmpty) && (adminId == null || adminId.isEmpty)) {
-        return {
-          'adminId': '',
-          'appName': 'AppifyYours',
-          'shopName': 'AppifyYours'
-        };
-      }
       
       // Build URL with adminId parameter
       String url = '$baseUrl/api/admin/splash';
@@ -979,13 +966,7 @@ class ApiService {
         url += '?adminId=$adminId';
       }
       
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
-        },
-      );
+      final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         return json.decode(response.body);
@@ -1007,39 +988,14 @@ class ApiService {
   Future<Map<String, dynamic>> getFormData({String? adminId}) async {
     try {
       print('Getting form data with adminId: $adminId');
-
-      const fixedUserId = String.fromEnvironment('FIXED_USER_ID');
-      final effectiveAdminId = (fixedUserId.isNotEmpty) ? fixedUserId : adminId;
-      if (fixedUserId.isNotEmpty) {
-        final response = await http.get(Uri.parse('$baseUrl/api/public/get-form/$fixedUserId'));
-
-        if (response.statusCode == 200) {
-          final data = json.decode(response.body);
-          print('Form data fetched successfully (fixed app): ${(data as Map).keys}');
-          return Map<String, dynamic>.from(data as Map);
-        }
-
-        throw Exception('Failed to get form data (fixed app): ${response.statusCode}');
-      }
       
       // Build URL with adminId parameter
       String url = '$baseUrl/api/get-form';
-      if (effectiveAdminId != null && effectiveAdminId.isNotEmpty) {
-        url += '?adminId=$effectiveAdminId';
+      if (adminId != null && adminId.isNotEmpty) {
+        url += '?adminId=$adminId';
       }
-
-      final token = await _getToken();
-      if (token == null || token.isEmpty) {
-        throw Exception('No authentication token found');
-      }
-
-      final response = await http.get(
-        Uri.parse(url),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
+      
+      final response = await http.get(Uri.parse(url));
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -1061,77 +1017,47 @@ class ApiService {
   }
 
   // Get app info for admin-user linking
-  Future<Map<String, dynamic>> getAppInfo({bool clearCache = false}) async {
+  Future<Map<String, dynamic>> getAppInfo() async {
     try {
       print('Getting app info - using baseUrl: $baseUrl');
       
-      // Get JWT token
-      final prefs = await SharedPreferences.getInstance();
-      final token = prefs.getString('auth_token');
+      // Get the stored auth token
+      final token = await _getToken();
       
-      // Clear cache if requested
-      if (clearCache) {
-        await prefs.remove('cached_app_info');
-        await prefs.remove('cached_app_info_timestamp');
-        print('App info cache cleared');
-      }
-      
-      // Check cache first (if not clearing)
-      if (!clearCache) {
-        final cachedData = prefs.getString('cached_app_info');
-        final cachedTimestamp = prefs.getInt('cached_app_info_timestamp');
-        
-        if (cachedData != null && cachedTimestamp != null) {
-          final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTimestamp;
-          // Use cache if it's less than 5 minutes old
-          if (cacheAge < 5 * 60 * 1000) {
-            print('Using cached app info (${(cacheAge / 1000).toInt()} seconds old)');
-            return json.decode(cachedData);
-          } else {
-            print('App info cache expired, clearing...');
-            await prefs.remove('cached_app_info');
-            await prefs.remove('cached_app_info_timestamp');
+      if (token == null || token.isEmpty) {
+        print('No auth token found for app info request');
+        return {
+          'success': false,
+          'data': {
+            'adminId': '', // No hardcoded fallback
+            'appName': 'MyApp',
+            'company': 'Appifyours',
+            'version': '1.0.0'
           }
-        }
-      }
-      
-      final headers = {
-        'Content-Type': 'application/json',
-      };
-      
-      // Add authorization header if token exists
-      if (token != null && token.isNotEmpty) {
-        headers['Authorization'] = 'Bearer $token';
-        print('Adding JWT token to app info request');
+        };
       }
       
       final response = await http.get(
         Uri.parse('$baseUrl/api/admin/app-info'),
-        headers: headers,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
       );
 
       print('App info response status: ${response.statusCode}');
       print('App info response body: ${response.body}');
 
-      Map<String, dynamic> result;
-      
       if (response.statusCode == 200) {
-        final decoded = json.decode(response.body);
-        final appInfo = (decoded is Map<String, dynamic>) ? (decoded['data'] ?? decoded) : decoded;
-        result = {
+        final data = json.decode(response.body);
+        return {
           'success': true,
-          'data': appInfo,
+          'data': data,
           'statusCode': response.statusCode,
         };
-        
-        // Cache the successful response
-        await prefs.setString('cached_app_info', json.encode(result));
-        await prefs.setInt('cached_app_info_timestamp', DateTime.now().millisecondsSinceEpoch);
-        print('App info cached successfully');
-        
       } else {
         print('App info request failed with status: ${response.statusCode}');
-        result = {
+        return {
           'success': false,
           'data': {
             'adminId': '', // No hardcoded fallback
@@ -1142,8 +1068,6 @@ class ApiService {
           'statusCode': response.statusCode,
         };
       }
-      
-      return result;
     } catch (e) {
       print('Error getting app info: $e');
       return {
@@ -1157,14 +1081,6 @@ class ApiService {
         'statusCode': 500,
       };
     }
-  }
-
-  // Clear app info cache
-  Future<void> clearAppInfoCache() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('cached_app_info');
-    await prefs.remove('cached_app_info_timestamp');
-    print('App info cache cleared manually');
   }
 
   // Enhanced signup with admin and shop linking
@@ -1502,37 +1418,10 @@ class ApiService {
   // Get dynamic app configuration
   Future<Map<String, dynamic>> getDynamicAppConfig() async {
     try {
-      const fixedUserId = String.fromEnvironment('FIXED_USER_ID');
-      if (fixedUserId.isNotEmpty) {
-        print('Using FIXED_USER_ID for dynamic config: $fixedUserId');
-        final response = await http.get(Uri.parse('$baseUrl/api/public/app/dynamic/$fixedUserId'));
-        print('Fixed Dynamic App Config Response Status: ${response.statusCode}');
-        print('Fixed Dynamic App Config Response Body: ${response.body}');
-
-        return {
-          'success': response.statusCode == 200,
-          'data': json.decode(response.body),
-          'statusCode': response.statusCode,
-        };
-      }
-
-      final token = await _getToken();
-      final userId = await _getUserId();
-
-      if (token == null || token.isEmpty) {
-        throw Exception('No authentication token found');
-      }
-      if (userId == null || userId.isEmpty) {
-        throw Exception('No user id found in local storage');
-      }
-
-      // IMPORTANT: Fetch config scoped to the logged-in user only
-      // Do NOT use the generic /api/app/config endpoint since it returns a default/global config.
       final response = await http.get(
-        Uri.parse('$baseUrl/api/app/dynamic/$userId'),
+        Uri.parse('$baseUrl/api/app/config'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
         },
       );
 
