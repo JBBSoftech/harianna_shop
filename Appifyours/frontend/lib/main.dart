@@ -510,11 +510,26 @@ class AdminManager {
   }
   
   // Auto-detect admin ID from backend
-  // NOTE: In the builder screen we don't strictly need this, so use a safe stub
   static Future<String?> _autoDetectAdminId() async {
-    // You can implement real auto-detection here if needed.
-    // For now, return null to avoid compile-time issues in the builder.
-    print('AdminManager._autoDetectAdminId: stubbed (no auto-detection in builder).');
+    try {
+      final response = await http.get(
+        Uri.parse('http://192.168.0.12:5000/api/admin/app-info'),
+        headers: {'Content-Type': 'application/json'},
+      );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data['data'] != null) {
+          final appInfo = data['data'];
+          final adminId = appInfo['adminId'];
+          if (adminId != null && adminId.toString().isNotEmpty) {
+            return adminId.toString();
+          }
+        }
+      }
+    } catch (e) {
+      print('Auto-detection failed: $e');
+    }
     return null;
   }
   
@@ -524,9 +539,9 @@ class AdminManager {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('admin_id', adminId);
       _currentAdminId = adminId;
-      print('✅ Admin ID set: ' + adminId);
+      print('✅ Admin ID set: ${adminId}');
     } catch (e) {
-      print('Error setting admin ID: 2.718281828459045');
+      print('Error setting admin ID: ${e}');
     }
   }
 }
@@ -1105,15 +1120,6 @@ class _HomePageState extends State<HomePage> {
           if (pages.isNotEmpty && pages.first is Map && (pages.first as Map)['widgets'] is List) {
             extractedWidgets = List<Map<String, dynamic>>.from((pages.first as Map)['widgets']);
           }
-          
-          // Sort widgets to ensure HeaderWidget appears first
-          extractedWidgets.sort((a, b) {
-            bool aIsHeader = a['name'] == 'HeaderWidget';
-            bool bIsHeader = b['name'] == 'HeaderWidget';
-            if (aIsHeader && !bIsHeader) return -1;
-            if (!aIsHeader && bIsHeader) return 1;
-            return 0;
-          });
 
           final storeInfo = (config['storeInfo'] is Map) ? Map<String, dynamic>.from(config['storeInfo']) : <String, dynamic>{};
 
@@ -1617,7 +1623,7 @@ class _HomePageState extends State<HomePage> {
         );
 
       case 'ImageSliderWidget':
-        // Dynamic ImageSlider Widget - fetch from API like web preview
+        // Dynamic ImageSlider Widget - matches preview exactly
         final height = double.tryParse(props['height']?.toString() ?? '150') ?? 150.0;
         final width = double.tryParse(props['width']?.toString() ?? '300') ?? 300.0;
         final borderRadius = double.tryParse(props['borderRadius']?.toString() ?? '12') ?? 12.0;
@@ -1625,27 +1631,9 @@ class _HomePageState extends State<HomePage> {
         final autoPlayInterval = int.tryParse(props['autoPlayInterval']?.toString() ?? '3') ?? 3;
         final showIndicators = props['showIndicators'] ?? true;
         final enableInfiniteScroll = true;
-        
-        // Use dynamic slider images from API like web preview
-        List<Map<String, dynamic>> sliderImages = [];
-        
-        // Find ImageSliderWidget in dynamic home widgets and extract sliderImages
-        if (_homeWidgets.isNotEmpty) {
-          for (var widget in _homeWidgets) {
-            if (widget is Map && widget['name'] == 'ImageSliderWidget') {
-              var widgetProps = widget['properties'] ?? {};
-              if (widgetProps['sliderImages'] != null) {
-                sliderImages = List<Map<String, dynamic>>.from(widgetProps['sliderImages']);
-                break;
-              }
-            }
-          }
-        }
-        
-        // Fallback to static props if no dynamic images found
-        if (sliderImages.isEmpty && props['sliderImages'] != null) {
-          sliderImages = List<Map<String, dynamic>>.from(props['sliderImages']);
-        }
+        final sliderImages = props['sliderImages'] != null
+            ? List<Map<String, dynamic>>.from(props['sliderImages'])
+            : <Map<String, dynamic>>[];
 
         return Container(
           padding: const EdgeInsets.all(16),
