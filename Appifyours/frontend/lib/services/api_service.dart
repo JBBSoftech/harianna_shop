@@ -962,6 +962,16 @@ class ApiService {
 
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
+
+      // If we are not authenticated yet and no adminId is provided,
+      // do not call the backend (it will reject with 400/401).
+      if ((token == null || token.isEmpty) && (adminId == null || adminId.isEmpty)) {
+        return {
+          'adminId': '',
+          'appName': 'AppifyYours',
+          'shopName': 'AppifyYours'
+        };
+      }
       
       // Build URL with adminId parameter
       String url = '$baseUrl/api/admin/splash';
