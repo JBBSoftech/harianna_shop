@@ -99,6 +99,24 @@ class CartManager extends ChangeNotifier {
   // Get discount percentage
   double get discountPercentage => _discountPercentage;
   
+  // Update GST percentage
+  void updateGSTPercentage(double percentage) {
+    _gstPercentage = percentage;
+    notifyListeners();
+  }
+  
+  // Update discount percentage
+  void updateDiscountPercentage(double percentage) {
+    _discountPercentage = percentage;
+    notifyListeners();
+  }
+  
+  // Get GST percentage
+  double get gstPercentage => _gstPercentage;
+  
+  // Get discount percentage
+  double get discountPercentage => _discountPercentage;
+  
   void addItem(CartItem item) {
     final existingIndex = _items.indexWhere((i) => i.id == item.id);
     if (existingIndex >= 0) {
@@ -513,7 +531,7 @@ class AdminManager {
   static Future<String?> _autoDetectAdminId() async {
     try {
       final response = await http.get(
-        Uri.parse('http://192.168.0.6:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.14:5000/api/admin/app-info'),
         headers: {'Content-Type': 'application/json'},
       );
       
@@ -1067,68 +1085,6 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _filteredProducts = [];
   List<Map<String, dynamic>> _dynamicProductCards = [];
   bool _isLoading = true;
-  List<Map<String, dynamic>> _homeWidgets = [];
-  Map<String, dynamic> _dynamicStoreInfo = {};
-  Map<String, dynamic> _dynamicDesignSettings = {};
-  Timer? _dynamicRefreshTimer;
-  bool _isFetchingDynamicConfig = false;
-
-  Map<String, dynamic> _normalizeProduct(Map<String, dynamic> raw, int index) {
-    final Map<String, dynamic> p = Map<String, dynamic>.from(raw);
-
-    // Normalize ID
-    p['id'] = (p['id'] ?? p['_id'] ?? p['productId'] ?? ('product_' + index.toString())).toString();
-
-    // Normalize name
-    p['productName'] = (p['productName'] ?? p['name'] ?? p['title'] ?? 'Product').toString();
-
-    // Normalize image field (support base64 and URL)
-    final dynamic imageCandidate = p['imageAsset'] ?? p['image'] ?? p['imageUrl'] ?? p['imageURL'] ?? p['productImage'] ?? p['thumbnail'] ?? p['photo'];
-    if (imageCandidate != null) {
-      p['imageAsset'] = imageCandidate.toString();
-    }
-
-    // Normalize currency
-    final String currencyCode = (p['currencyCode'] ?? p['currency'] ?? p['currency_code'] ?? '').toString();
-    if (currencyCode.isNotEmpty) {
-      p['currencyCode'] = currencyCode;
-    }
-
-    final String currencySymbol = (p['currencySymbol'] ?? p['currency_symbol'] ?? '').toString();
-    if (currencySymbol.isNotEmpty) {
-      p['currencySymbol'] = currencySymbol;
-    }
-
-    // Normalize price (try multiple keys)
-    final dynamic priceCandidate = p['price'] ?? p['productPrice'] ?? p['currentPrice'] ?? p['basePrice'] ?? p['salePrice'] ?? p['mrp'] ?? p['amount'];
-    if (priceCandidate != null) {
-      p['price'] = priceCandidate.toString();
-    } else {
-      p['price'] = (p['price'] ?? '').toString();
-    }
-
-    // Normalize discount fields
-    final dynamic discountPriceCandidate = p['discountPrice'] ?? p['discountedPrice'] ?? p['offerPrice'] ?? p['finalPrice'];
-    if (discountPriceCandidate != null) {
-      p['discountPrice'] = discountPriceCandidate.toString();
-    }
-
-    // Sometimes discount percent comes as number/string.
-    if (p['discountPercent'] == null && p['discountPercentage'] != null) {
-      p['discountPercent'] = p['discountPercentage'];
-    }
-
-    // Normalize quantity / stock
-    if (p['quantity'] == null && p['stock'] != null) {
-      p['quantity'] = p['stock'];
-    }
-
-    return p;
-  }
-
-  String _resolveSliderImage(Map<String, dynamic> imageData) {
-    return (imageData['imageAsset'] ?? imageData['image'] ?? imageData['imageUrl'] ?? imageData['url'] ?? '').toString();
-  }
 
   @override
   void initState() {
@@ -1137,94 +1093,45 @@ class _HomePageState extends State<HomePage> {
     _dynamicProductCards = List.from(productCards); // Fallback to static data
     _filteredProducts = List.from(_dynamicProductCards);
     _loadDynamicData();
-
-    // Auto-refresh dynamic configuration so changes done in AppBuilder reflect
-    // on the already-built APK without rebuilding.
-    _dynamicRefreshTimer?.cancel();
-    _dynamicRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-      if (!mounted) return;
-      await _loadDynamicAppConfig();
-    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
-    _dynamicRefreshTimer?.cancel();
     super.dispose();
   }
 
   // Real-time updates removed - app updates dynamically via WebSocket
 
-  Future<void> _loadDynamicData() async {
-    setState(() => _isLoading = true);
-    await _loadDynamicAppConfig();
-    if (mounted) {
-      setState(() => _isLoading = false);
-    }
-  }
-
   // Load dynamic data from backend
   Future<void> _loadDynamicAppConfig() async {
     try {
-      if (_isFetchingDynamicConfig) return;
-      _isFetchingDynamicConfig = true;
+      // Get dynamic admin ID
+      final adminId = await AdminManager.getCurrentAdminId();
+      print('🔍 Home page using admin ID: ${adminId}');
+      
+      final response = await http.get(
+        Uri.parse('${Environment.apiBase}/api/app/dynamic/${adminId}'),
+        headers: {'Content-Type': 'application/json'},
+      );
 
-      // Always load config scoped to the authenticated user.
-      // This prevents showing another user's app data and ensures price/image are truly dynamic.
-      final apiService = ApiService();
-      final result = await apiService.getDynamicAppConfig();
-
-      if (result['success'] == true) {
-        final data = (result['data'] is Map)
-            ? Map<String, dynamic>.from(result['data'])
-            : <String, dynamic>{};
-        final config = (data['config'] is Map)
-            ? Map<String, dynamic>.from(data['config'])
-            : <String, dynamic>{};
-
-        if (config.isNotEmpty) {
-          final rawProducts = (config['productCards'] is List)
-              ? List<Map<String, dynamic>>.from(config['productCards'])
-              : <Map<String, dynamic>>[];
-          final newProducts = rawProducts.asMap().entries.map((e) => _normalizeProduct(e.value, e.key)).toList();
-          final pages = (config['pages'] is List) ? List.from(config['pages']) : <dynamic>[];
-
-          // Extract widgets from first page (Home)
-          List<Map<String, dynamic>> extractedWidgets = [];
-          if (pages.isNotEmpty && pages.first is Map && (pages.first as Map)['widgets'] is List) {
-            extractedWidgets = List<Map<String, dynamic>>.from((pages.first as Map)['widgets']);
-          }
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data['config'] != null) {
+          final config = data['config'];
+          final newProducts = List<Map<String, dynamic>>.from(config['productCards'] ?? []);
           
-          // Sort widgets to ensure HeaderWidget appears first
-          extractedWidgets.sort((a, b) {
-            bool aIsHeader = a['name'] == 'HeaderWidget';
-            bool bIsHeader = b['name'] == 'HeaderWidget';
-            if (aIsHeader && !bIsHeader) return -1;
-            if (!aIsHeader && bIsHeader) return 1;
-            return 0;
-          });
-
-          final storeInfo = (config['storeInfo'] is Map) ? Map<String, dynamic>.from(config['storeInfo']) : <String, dynamic>{};
-          final designSettings = (config['designSettings'] is Map)
-              ? Map<String, dynamic>.from(config['designSettings'])
-              : <String, dynamic>{};
-
           setState(() {
             _dynamicProductCards = newProducts.isNotEmpty ? newProducts : productCards;
             _filterProducts(_searchQuery); // Re-apply current filter
-            _homeWidgets = extractedWidgets;
-            _dynamicStoreInfo = storeInfo;
-            _dynamicDesignSettings = designSettings;
             _isLoading = false;
           });
           print('✅ Loaded ${_dynamicProductCards.length} products from backend');
         }
+      }
     } catch (e) {
       print('❌ Error loading dynamic data: $e');
       setState(() => _isLoading = false);
-    } finally {
-      _isFetchingDynamicConfig = false;
     }
   }
 
@@ -1300,841 +1207,271 @@ class _HomePageState extends State<HomePage> {
   );
 
   Widget _buildHomePage() {
-    if (_isLoading) {
-      return const Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
+    return FutureBuilder<Map<String, dynamic>>(
+      future: _loadDynamicStoreData(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                CircularProgressIndicator(),
+                SizedBox(height: 16),
+                Text('Loading store data...'),
+              ],
+            ),
+          );
+        }
+
+        if (snapshot.hasError) {
+          return Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.error, color: Colors.red, size: 64),
+                SizedBox(height: 16),
+                Text('Error loading store data'),
+                Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey)),
+                ElevatedButton(
+                  onPressed: () => setState(() {}),
+                  child: Text('Retry'),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final storeData = snapshot.data ?? {};
+        final storeName = storeData['storeName'] ?? 'My Store';
+        final storeAddress = storeData['address'] ?? '123 Main St';
+        final storeEmail = storeData['email'] ?? 'support@example.com';
+        final storePhone = storeData['phone'] ?? '(123) 456-7890';
+        final headerColor = storeData['headerColor'] != null 
+            ? _colorFromHex(storeData['headerColor']) 
+            : Color(0xff4fb322);
+        final bannerText = storeData['bannerText'] ?? 'Welcome to our store!';
+        final bannerButtonText = storeData['bannerButtonText'] ?? 'Shop Now';
+
+        return Column(
           children: [
-            CircularProgressIndicator(),
-            SizedBox(height: 16),
-            Text('Loading...'),
-          ],
-        ),
-      );
-    }
-
-    return RefreshIndicator(
-      onRefresh: _loadDynamicData,
-      child: SingleChildScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        child: Column(
-          children: (
-            _homeWidgets.isNotEmpty
-                ? _homeWidgets.map((w) => _buildHomeWidgetFromConfig(w)).toList()
-                : <Widget>[
-                    _buildHomeWidgetFromConfig({'name': 'HeaderWidget', 'properties': {}}),
-                    _buildHomeWidgetFromConfig({'name': 'HeroBannerWidget', 'properties': {}}),
-                    _buildHomeWidgetFromConfig({'name': 'ProductSearchBarWidget', 'properties': {}}),
-                    _buildHomeWidgetFromConfig({'name': 'Catalog View Card', 'properties': {}}),
-                    _buildHomeWidgetFromConfig({'name': 'StoreInfoWidget', 'properties': {}}),
-                  ]
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHomeWidgetFromConfig(Map<String, dynamic> widgetData) {
-    final name = (widgetData['name'] ?? '').toString();
-    final props = widgetData['properties'] is Map
-        ? Map<String, dynamic>.from(widgetData['properties'])
-        : <String, dynamic>{};
-
-    switch (name) {
-      case 'HeaderWidget':
-        // Static Header Widget - uses API data, matches preview alignment
-        final appName = (_dynamicStoreInfo['storeName'] ?? 'My Store').toString();
-        final bg = (_dynamicDesignSettings['headerColor'] ?? '#4fb322').toString();
-        final backgroundColor = _colorFromHex(bg);
-        final height = 60.0;
-        final textColor = Colors.white;
-        final fontSize = 16.0;
-        final fontWeight = FontWeight.bold;
-        final textAlign = 'left';
-
-        return Container(
-          width: double.infinity,
-          height: height,
-          color: backgroundColor,
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Container(
-            decoration: BoxDecoration(
-              color: Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
-            ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              mainAxisAlignment: textAlign == 'center' ? MainAxisAlignment.center : 
-                           textAlign == 'right' ? MainAxisAlignment.end : MainAxisAlignment.start,
-              children: [
-                if (textAlign != 'right')
-                  const Icon(Icons.store, size: 24, color: Colors.white),
-                if (textAlign != 'right') const SizedBox(width: 6),
-                Text(
-                  appName,
-                  textAlign: textAlign == 'center' ? TextAlign.center : 
-                           textAlign == 'right' ? TextAlign.right : TextAlign.left,
-                  style: TextStyle(
-                    color: textColor,
-                    fontWeight: fontWeight,
-                    fontSize: fontSize,
-                  ),
-                ),
-                if (textAlign == 'right') const SizedBox(width: 6),
-                if (textAlign == 'right')
-                  const Icon(Icons.store, size: 24, color: Colors.white),
-              ],
-            ),
-          ),
-        );
-
-      case 'HeroBannerWidget':
-        // Dynamic HeroBanner Widget - matches preview exactly
-        final imageAsset = props['imageAsset'];
-        final title = props['title'] ?? 'Welcome to Our Store!';
-        final subtitle = props['subtitle'] ?? 'Shop the latest products';
-        final buttonText = props['buttonText'] ?? 'Shop Now';
-        final height = double.tryParse(props['height']?.toString() ?? '200') ?? 200.0;
-        final backgroundColor = props['backgroundColor'] != null
-            ? _colorFromHex(props['backgroundColor'])
-            : Colors.blue;
-        final buttonColor = props['buttonColor'] != null
-            ? _colorFromHex(props['buttonColor'])
-            : Colors.orange;
-        final buttonTextColor = props['buttonTextColor'] != null
-            ? _colorFromHex(props['buttonTextColor'])
-            : Colors.white;
-        final titleColor = props['titleColor'] != null
-            ? _colorFromHex(props['titleColor'])
-            : Colors.white;
-        final subtitleColor = props['subtitleColor'] != null
-            ? _colorFromHex(props['subtitleColor'])
-            : Colors.white70;
-        final alignment = props['alignment'] ?? 'center';
-        final textAlign = props['textAlign'] ?? 'center';
-        final showButton = props['showButton'] ?? true;
-        final showSubtitle = props['showSubtitle'] ?? true;
-        final borderRadiusValue = double.tryParse(props['borderRadius']?.toString() ?? '0') ?? 0.0;
-
-        return Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: backgroundColor,
-            borderRadius: BorderRadius.circular(borderRadiusValue),
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(borderRadiusValue),
-            child: Stack(
-              children: [
-                if (imageAsset != null)
-                  Container(
-                    width: double.infinity,
-                    height: double.infinity,
-                    child: imageAsset.toString().startsWith('data:image/')
-                        ? Image.memory(
-                            base64Decode(imageAsset.toString().split(',')[1]),
-                            width: double.infinity,
-                            height: double.infinity,
-                            fit: BoxFit.cover,
-                          )
-                        : Image.network(
-                            imageAsset,
-                            width: double.infinity,
-                            height: double.infinity,
-                            fit: BoxFit.cover,
-                          ),
-                  ),
-                Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: [
-                        Colors.black.withOpacity(0.3),
-                        Colors.black.withOpacity(0.5),
-                      ],
-                    ),
-                    borderRadius: BorderRadius.circular(borderRadiusValue),
-                  ),
-                ),
-                Container(
-                  width: double.infinity,
-                  height: double.infinity,
-                  padding: const EdgeInsets.all(24),
-                  child: Column(
-                    mainAxisAlignment: alignment == 'top' ? MainAxisAlignment.start :
-                                      alignment == 'bottom' ? MainAxisAlignment.end :
-                                      MainAxisAlignment.center,
-                    crossAxisAlignment: textAlign == 'left' ? CrossAxisAlignment.start :
-                                    textAlign == 'right' ? CrossAxisAlignment.end :
-                                    CrossAxisAlignment.center,
-                    children: [
-                      Text(
-                        title,
-                        textAlign: textAlign == 'left' ? TextAlign.left :
-                                  textAlign == 'right' ? TextAlign.right :
-                                  TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold,
-                          color: titleColor,
-                        ),
-                      ),
-                      if (showSubtitle && subtitle.isNotEmpty) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          subtitle,
-                          textAlign: textAlign == 'left' ? TextAlign.left :
-                                    textAlign == 'right' ? TextAlign.right :
-                                    TextAlign.center,
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: subtitleColor,
-                          ),
-                        ),
-                      ],
-                      if (showButton) ...[
-                        const SizedBox(height: 20),
-                        ElevatedButton(
-                          onPressed: () {},
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: buttonColor,
-                            foregroundColor: buttonTextColor,
-                            padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(25),
-                            ),
-                          ),
-                          child: Text(
-                            buttonText,
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-
-      case 'ProductSearchBarWidget':
-        // Dynamic ProductSearchBar Widget - matches preview exactly
-        final placeholder = props['placeholder'] ?? 'Search products';
-        final height = double.tryParse(props['height']?.toString() ?? '50') ?? 50.0;
-        final width = double.tryParse(props['width']?.toString() ?? '300') ?? 300.0;
-        final borderRadius = double.tryParse(props['borderRadius']?.toString() ?? '25') ?? 25.0;
-        final borderWidth = double.tryParse(props['borderWidth']?.toString() ?? '1') ?? 1.0;
-        final iconColor = props['iconColor'] != null
-            ? _colorFromHex(props['iconColor'])
-            : Colors.grey.shade600;
-        final textColor = props['textColor'] != null
-            ? _colorFromHex(props['textColor'])
-            : Colors.black;
-        final borderColor = props['borderColor'] != null
-            ? _colorFromHex(props['borderColor'])
-            : Colors.grey.shade300;
-
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            children: [
-              SizedBox(
-                width: width,
-                height: height,
-                child: TextField(
-                  onChanged: _filterProducts,
-                  enabled: true,
-                  readOnly: false,
-                  style: TextStyle(color: textColor, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: placeholder,
-                    hintStyle: TextStyle(color: textColor.withOpacity(0.6), fontSize: 14),
-                    prefixIcon: Icon(Icons.search, color: iconColor, size: 20),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(borderRadius),
-                      borderSide: BorderSide(color: borderColor, width: borderWidth),
-                    ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(borderRadius),
-                      borderSide: BorderSide(color: borderColor, width: borderWidth),
-                    ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(borderRadius),
-                      borderSide: BorderSide(color: textColor, width: borderWidth),
-                    ),
-                    filled: true,
-                    fillColor: Colors.white,
-                    isDense: false,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-
-      case 'Catalog View Card':
-      case 'Product Detail Card':
-        return _buildDynamicProductGrid();
-
-      case 'StoreInfoWidget':
-        // Static StoreInfo Widget - uses API data, matches preview exactly
-        final storeName = (_dynamicStoreInfo['storeName']?.toString().trim() ?? '');
-        final address = (_dynamicStoreInfo['address']?.toString().trim() ?? '');
-        final email = (_dynamicStoreInfo['email']?.toString().trim() ?? '');
-        final phone = (_dynamicStoreInfo['phone']?.toString().trim() ?? '');
-        final website = (_dynamicStoreInfo['website']?.toString().trim() ?? '');
-        final footerText = (_dynamicStoreInfo['footerText']?.toString().trim() ?? '');
-        final storeLogo = _dynamicStoreInfo['storeLogo'];
-
-        final textColor = Colors.black;
-        final iconColor = Colors.blue;
-        final backgroundColor = const Color(0xFFE3F2FD);
-        final borderRadius = 8.0;
-
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Card(
-            elevation: 2,
-            color: backgroundColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(borderRadius)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+            // Dynamic Header
+            Container(
+              color: headerColor,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
                 children: [
-                  Row(
+                  const Icon(Icons.store, size: 32, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Text(
+                    storeName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
+                    ),
+                  ),
+                  const Spacer(),
+                  Stack(
                     children: [
-                      if (storeLogo != null && storeLogo.toString().isNotEmpty)
-                        storeLogo.toString().startsWith('data:image/')
-                            ? Image.memory(
-                                base64Decode(storeLogo.toString().split(',')[1]),
-                                width: 48,
-                                height: 48,
-                                fit: BoxFit.cover,
-                              )
-                            : Image.network(
-                                storeLogo,
-                                width: 48,
-                                height: 48,
-                                fit: BoxFit.cover,
-                              )
-                      else
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: Colors.grey.shade200,
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(Icons.store, size: 24),
-                        ),
-                      const SizedBox(width: 12),
-                      if (storeName.isNotEmpty)
-                        Expanded(
-                          child: Text(
-                            storeName,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.bold,
-                              color: textColor,
+                      const Icon(Icons.shopping_cart, color: Colors.white, size: 20),
+                      if (_cartManager.items.isNotEmpty)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '0',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                              textAlign: TextAlign.center,
                             ),
                           ),
                         ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  if (address.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.location_on, color: iconColor, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(address, style: TextStyle(fontSize: 12, color: textColor))),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (email.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.email, color: iconColor, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(email, style: TextStyle(fontSize: 12, color: textColor))),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (phone.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.phone, color: iconColor, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(phone, style: TextStyle(fontSize: 12, color: textColor))),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                  ],
-                  if (website.isNotEmpty) ...[
-                    Row(
-                      children: [
-                        Icon(Icons.language, color: iconColor, size: 16),
-                        const SizedBox(width: 8),
-                        Expanded(child: Text(website, style: TextStyle(fontSize: 12, color: textColor))),
-                      ],
-                    ),
-                  ],
-                  const SizedBox(height: 16),
-                  const Divider(),
-                  const SizedBox(height: 12),
-                  if (footerText.isNotEmpty)
-                    Center(
-                      child: Text(
-                        footerText,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 10,
+                  const SizedBox(width: 16),
+                  Stack(
+                    children: [
+                      const Icon(Icons.favorite, color: Colors.white, size: 20),
+                      if (_wishlistManager.items.isNotEmpty)
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: Container(
+                            padding: const EdgeInsets.all(2),
+                            decoration: const BoxDecoration(
+                              color: Colors.red,
+                              shape: BoxShape.circle,
+                            ),
+                            constraints: const BoxConstraints(
+                              minWidth: 16,
+                              minHeight: 16,
+                            ),
+                            child: Text(
+                              '${_wishlistManager.items.length}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
+                    ],
+                  ),
                 ],
               ),
             ),
-          ),
-        );
-
-      case 'ImageSliderWidget':
-        // Dynamic ImageSlider Widget - fetch from API like web preview
-        final height = double.tryParse(props['height']?.toString() ?? '150') ?? 150.0;
-        final width = double.tryParse(props['width']?.toString() ?? '300') ?? 300.0;
-        final borderRadius = double.tryParse(props['borderRadius']?.toString() ?? '12') ?? 12.0;
-        final autoPlay = props['autoPlay'] ?? true;
-        final autoPlayInterval = int.tryParse(props['autoPlayInterval']?.toString() ?? '3') ?? 3;
-        final showIndicators = props['showIndicators'] ?? true;
-        final enableInfiniteScroll = true;
-        
-        // Use dynamic slider images from API like web preview
-        List<Map<String, dynamic>> sliderImages = [];
-        
-        // Find ImageSliderWidget in dynamic home widgets and extract sliderImages
-        if (_homeWidgets.isNotEmpty) {
-          for (var widget in _homeWidgets) {
-            if (widget is Map && widget['name'] == 'ImageSliderWidget') {
-              var widgetProps = widget['properties'] ?? {};
-              if (widgetProps['sliderImages'] != null) {
-                sliderImages = List<Map<String, dynamic>>.from(widgetProps['sliderImages']);
-                break;
-              }
-            }
-          }
-        }
-        
-        // Fallback to static props if no dynamic images found
-        if (sliderImages.isEmpty && props['sliderImages'] != null) {
-          sliderImages = List<Map<String, dynamic>>.from(props['sliderImages']);
-        }
-
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              if (sliderImages.isNotEmpty)
-                Column(
-                  children: [
-                    Container(
-                      constraints: BoxConstraints(
-                        maxWidth: width,
-                        maxHeight: height + 20, // Add padding to prevent overflow
-                      ),
-                      child: CarouselSlider(
-                        options: CarouselOptions(
-                          height: height,
-                          autoPlay: autoPlay,
-                          autoPlayInterval: Duration(seconds: autoPlayInterval),
-                          autoPlayAnimationDuration: const Duration(milliseconds: 800),
-                          autoPlayCurve: Curves.fastOutSlowIn,
-                          enlargeCenterPage: true,
-                          scrollDirection: Axis.horizontal,
-                          enableInfiniteScroll: enableInfiniteScroll,
-                          viewportFraction: 0.8,
-                          enlargeFactor: 0.3,
+            Expanded(
+              child: RefreshIndicator(
+                onRefresh: () async {
+                  setState(() {});
+                },
+                child: SingleChildScrollView(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  child: Column(
+                    children: [
+                      // Dynamic Banner
+                      Container(
+                        height: 160,
+                        child: Stack(
+                          children: [
+                            Container(color: Color(0xFFBDBDBD)),
+                            Center(
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    bannerText,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                      shadows: [
+                                        Shadow(
+                                          blurRadius: 4.0,
+                                          color: Colors.black,
+                                          offset: Offset(1.0, 1.0),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton(
+                                    onPressed: () {},
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(20),
+                                      ),
+                                    ),
+                                    child: Text(bannerButtonText, style: const TextStyle(fontSize: 12)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
                         ),
-                        items: sliderImages.map((imageData) {
-                          return Builder(
-                            builder: (BuildContext context) {
-                              final String resolvedImage = _resolveSliderImage(
-                                (imageData is Map)
-                                    ? Map<String, dynamic>.from(imageData)
-                                    : <String, dynamic>{},
-                              );
-                              return Container(
-                                margin: const EdgeInsets.symmetric(horizontal: 5.0),
-                                decoration: BoxDecoration(
-                                  color: Colors.grey[300],
-                                  borderRadius: BorderRadius.circular(borderRadius),
-                                ),
-                                child: Stack(
+                      ),
+                      // Dynamic Product Grid
+                      _buildDynamicProductGrid(),
+                      // Dynamic Store Info
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        child: Card(
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
                                   children: [
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(borderRadius),
-                                      child: resolvedImage.isNotEmpty
-                                          ? resolvedImage.startsWith('data:image/')
-                                              ? Image.memory(
-                                                  base64Decode(resolvedImage.split(',')[1]),
-                                                  width: double.infinity,
-                                                  height: height,
-                                                  fit: BoxFit.cover,
-                                                )
-                                              : Image.network(
-                                                  resolvedImage,
-                                                  width: double.infinity,
-                                                  height: height,
-                                                  fit: BoxFit.cover,
-                                                )
-                                          : Container(
-                                              color: Colors.grey[300],
-                                              child: const Center(
-                                                child: Icon(Icons.image, size: 40, color: Colors.grey),
-                                              ),
-                                            ),
+                                    Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        color: Colors.grey.shade200,
+                                        borderRadius: BorderRadius.circular(8),
+                                      ),
+                                      child: const Icon(Icons.store, size: 24),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        storeName,
+                                        style: const TextStyle(
+                                          fontSize: 14,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 ),
-                              );
-                            },
-                          );
-                        }).toList(),
-                      ),
-                    ),
-                    if (showIndicators)
-                      const SizedBox(height: 8),
-                    if (showIndicators)
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: sliderImages.asMap().entries.map((entry) {
-                          return GestureDetector(
-                            onTap: () {},
-                            child: Container(
-                              width: 6.0,
-                              height: 6.0,
-                              margin: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 4.0),
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: Colors.blue.withOpacity(0.4),
-                              ),
+                                const SizedBox(height: 16),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.location_on, color: Colors.blue),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(storeAddress, style: TextStyle(fontSize: 12))),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.email, color: Colors.blue),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(storeEmail, style: TextStyle(fontSize: 12))),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.phone, color: Colors.blue),
+                                    const SizedBox(width: 8),
+                                    Expanded(child: Text(storePhone, style: TextStyle(fontSize: 12))),
+                                  ],
+                                ),
+                                const SizedBox(height: 16),
+                                const Divider(),
+                                const SizedBox(height: 12),
+                                Center(
+                                  child: Text(
+                                    '© 2023 ${storeName}. All rights reserved.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                      color: Colors.grey[600],
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
-                          );
-                        }).toList(),
+                          ),
+                        ),
                       ),
-                  ],
-                )
-              else
-                Container(
-                  height: height,
-                  decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Center(
-                    child: Text('No images added to slider', style: TextStyle(fontSize: 12)),
+                    ],
                   ),
                 ),
-            ],
-          ),
-        );
-
-      case 'ProductDescriptionWidget':
-        // Dynamic ProductDescription Widget - matches preview exactly
-        final title = props['descriptionTitle'] ?? 'Description';
-        final content = props['descriptionContent'] ?? '';
-        final productImage = props['productImage'];
-
-        final titleFontSize = double.tryParse(props['titleFontSize']?.toString() ?? '18') ?? 18.0;
-        final contentFontSize = double.tryParse(props['contentFontSize']?.toString() ?? '14') ?? 14.0;
-        final titleColor = props['titleColor'] != null
-            ? _colorFromHex(props['titleColor'])
-            : Colors.black;
-        final contentColor = props['contentColor'] != null
-            ? _colorFromHex(props['contentColor'])
-            : Colors.grey.shade700;
-        final backgroundColor = props['backgroundColor'] != null
-            ? _colorFromHex(props['backgroundColor'])
-            : Colors.white;
-
-        return Container(
-          width: double.infinity,
-          margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          child: Card(
-            elevation: 2,
-            color: backgroundColor,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      fontSize: titleFontSize,
-                      fontWeight: FontWeight.bold,
-                      color: titleColor,
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  if (productImage != null && productImage.toString().isNotEmpty)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: productImage.toString().startsWith('data:image/')
-                          ? Image.memory(
-                              base64Decode(productImage.toString().split(',')[1]),
-                              width: double.infinity,
-                              height: 160,
-                              fit: BoxFit.cover,
-                            )
-                          : Image.network(
-                              productImage,
-                              width: double.infinity,
-                              height: 160,
-                              fit: BoxFit.cover,
-                            ),
-                    ),
-                  if (productImage != null && productImage.toString().isNotEmpty) const SizedBox(height: 12),
-                  if (content.isNotEmpty)
-                    Text(
-                      content,
-                      style: TextStyle(
-                        fontSize: contentFontSize,
-                        color: contentColor,
-                        height: 1.5,
-                      ),
-                    ),
-                ],
               ),
             ),
-          ),
+          ],
         );
-
-      case 'SocialShareWidget':
-        // Dynamic SocialShare Widget - matches preview exactly
-        final title = props['title'] ?? 'Share this product';
-        final shareText = props['shareText'] ?? 'Share this product';
-        final shareLink = props['shareLink'] ?? 'https://example.com/product';
-        final facebookText = props['facebookText'] ?? 'Check out this amazing product!';
-        final twitterText = props['twitterText'] ?? 'Just found this great product! #shopping';
-        final iconSize = double.tryParse(props['iconSize']?.toString() ?? '32') ?? 32.0;
-        final facebookColor = props['facebookColor'] != null
-            ? _colorFromHex(props['facebookColor'])
-            : const Color(0xFF1877F2);
-        final twitterColor = props['twitterColor'] != null
-            ? _colorFromHex(props['twitterColor'])
-            : const Color(0xFF1DA1F2);
-        final whatsappColor = props['whatsappColor'] != null
-            ? _colorFromHex(props['whatsappColor'])
-            : const Color(0xFF25D366);
-        final copyLinkColor = props['copyLinkColor'] != null
-            ? _colorFromHex(props['copyLinkColor'])
-            : const Color(0xFF6C757D);
-        final instagramColor = props['instagramColor'] != null
-            ? _colorFromHex(props['instagramColor'])
-            : const Color(0xFFE4405F);
-        final showFacebook = props['showFacebook'] ?? true;
-        final showTwitter = props['showTwitter'] ?? true;
-        final showWhatsApp = props['showWhatsApp'] ?? true;
-        final showCopyLink = props['showCopyLink'] ?? true;
-        final showInstagram = props['showInstagram'] ?? true;
-
-        return Container(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                children: [
-                  if (showFacebook)
-                    Column(
-                      children: [
-                        Container(
-                          width: iconSize,
-                          height: iconSize,
-                          decoration: BoxDecoration(
-                            color: facebookColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.facebook, color: Colors.white, size: 18),
-                            onPressed: () {
-                              _shareToPlatform('facebook', shareLink, facebookText);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('Facebook', style: TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                  if (showTwitter)
-                    Column(
-                      children: [
-                        Container(
-                          width: iconSize,
-                          height: iconSize,
-                          decoration: BoxDecoration(
-                            color: twitterColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.alternate_email, color: Colors.white, size: 18),
-                            onPressed: () {
-                              _shareToPlatform('twitter', shareLink, twitterText);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('Twitter', style: TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                  if (showInstagram)
-                    Column(
-                      children: [
-                        Container(
-                          width: iconSize,
-                          height: iconSize,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              colors: [instagramColor, instagramColor.withOpacity(0.7)],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.camera_alt, color: Colors.white, size: 18),
-                            onPressed: () {
-                              _shareToPlatform('instagram', shareLink, shareText);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('Instagram', style: TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                  if (showWhatsApp)
-                    Column(
-                      children: [
-                        Container(
-                          width: iconSize,
-                          height: iconSize,
-                          decoration: BoxDecoration(
-                            color: whatsappColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.message, color: Colors.white, size: 18),
-                            onPressed: () {
-                              _shareToPlatform('whatsapp', shareLink, shareText);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('WhatsApp', style: TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                  if (showCopyLink)
-                    Column(
-                      children: [
-                        Container(
-                          width: iconSize,
-                          height: iconSize,
-                          decoration: BoxDecoration(
-                            color: copyLinkColor,
-                            shape: BoxShape.circle,
-                          ),
-                          child: IconButton(
-                            icon: const Icon(Icons.link, color: Colors.white, size: 18),
-                            onPressed: () {
-                              _copyShareLink(shareLink);
-                            },
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text('Copy Link', style: TextStyle(fontSize: 10)),
-                      ],
-                    ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              Text(
-                shareLink,
-                style: TextStyle(
-                  fontSize: 10,
-                  color: Colors.grey[600],
-                ),
-              ),
-            ],
-          ),
-        );
-
-      case 'SmallCardWidget':
-        final title = (props['title'] ?? 'Small Card').toString();
-        final subtitle = (props['subtitle'] ?? 'Card subtitle').toString();
-        return Container(
-          margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-          child: Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Row(
-                children: [
-                  Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.blue.shade100,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.card_giftcard, color: Colors.blue),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          title,
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                        ),
-                        Text(
-                          subtitle,
-                          style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-
-      default:
-        return const SizedBox.shrink();
-    }
+      },
+    );
   }
 
   // Load dynamic store data from backend
@@ -2182,41 +1519,62 @@ class _HomePageState extends State<HomePage> {
 
   // Build dynamic product grid
   Widget _buildDynamicProductGrid() {
-    final products = _searchQuery.isEmpty ? _dynamicProductCards : _filteredProducts;
+    return FutureBuilder<List<Map<String, dynamic>>>(
+      future: _loadDynamicProducts(),
+      builder: (context, snapshot) {
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(32),
+              child: CircularProgressIndicator(),
+            ),
+          );
+        }
 
-    if (products.isEmpty) {
-      return Container(
-        padding: const EdgeInsets.all(32),
-        child: Center(
+        final products = snapshot.data ?? [];
+        
+        if (products.isEmpty) {
+          return Container(
+            padding: const EdgeInsets.all(32),
+            child: Center(
+              child: Column(
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey),
+                  const SizedBox(height: 16),
+                  const Text('No products available'),
+                  const Text('Add products in admin panel to see them here'),
+                ],
+              ),
+            ),
+          );
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(16),
+          color: Color(0xFF4a0404),
           child: Column(
-            children: const [
-              Icon(Icons.inventory_2_outlined, size: 64, color: Colors.grey),
-              SizedBox(height: 16),
-              Text('No products available'),
-              Text('Add products in admin panel to see them here'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 8),
+                GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: 2,
+                    mainAxisSpacing: 16,
+                    crossAxisSpacing: 16,
+                    childAspectRatio: 0.68, // Adjusted for better card proportions
+                  ),
+                  itemCount: products.length,
+                  itemBuilder: (context, index) {
+                    final product = products[index];
+                    return _buildProductCard(product, index);
+                  },
+                ),
             ],
           ),
-        ),
-      );
-    }
-
-    return Container(
-      padding: const EdgeInsets.all(16),
-      child: GridView.builder(
-        shrinkWrap: true,
-        physics: const NeverScrollableScrollPhysics(),
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
-          mainAxisSpacing: 16,
-          crossAxisSpacing: 16,
-          childAspectRatio: 0.68,
-        ),
-        itemCount: products.length,
-        itemBuilder: (context, index) {
-          final product = products[index];
-          return _buildProductCard(product, index);
-        },
-      ),
+        );
+      },
     );
   }
 
@@ -2437,7 +1795,7 @@ class _HomePageState extends State<HomePage> {
                       productName,
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        fontSize: 13,
+                        fontSize: 1,
                       ),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -2681,41 +2039,23 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
-  // Helper methods for social sharing
-  void _shareToPlatform(String platform, String link, String text) {
-    // Simple implementation - in real app would use url_launcher or share_plus
-    print('Share to ' + platform + ': ' + link + ' with text: ' + text);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Sharing to ' + platform + '...')),
-    );
-  }
-
-  void _copyShareLink(String link) {
-    // Simple implementation - in real app would use clipboard
-    print('Copy link: ' + link);
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Link copied to clipboard!')),
-    );
-  }
-
   // Helper method to convert hex color to Color
   Color _colorFromHex(String? hexColor) {
     if (hexColor == null || hexColor.isEmpty) return Colors.blue;
     
-    String localFormattedColor = hexColor.toUpperCase().replaceAll('#', '');
+    String formattedColor = hexColor;
+    if (!hexColor.startsWith('#')) {
+      formattedColor = '#$hexColor';
+    }
     
-    if (localFormattedColor.length == 6) {
-      localFormattedColor = 'FF' + localFormattedColor;
-    } else if (localFormattedColor.length == 8) {
-      // Already has alpha channel
-    } else {
-      return Colors.blue;
+    if (formattedColor.length == 7) {
+      formattedColor = formattedColor.replaceFirst('#', '#FF');
     }
     
     try {
-      return Color(int.parse('0x' + localFormattedColor));
+      return Color(int.parse(formattedColor));
     } catch (e) {
-      print('Invalid color: ' + hexColor);
+      print('Invalid color: $hexColor');
       return Colors.blue;
     }
   }
@@ -2951,33 +2291,6 @@ class _HomePageState extends State<HomePage> {
                     ],
                   ),
                 ),
-                // Buy Now Button
-                Container(
-                  margin: const EdgeInsets.all(16),
-                  width: double.infinity,
-                  child: ElevatedButton(
-                    onPressed: () {
-                      // Handle buy now action
-                      _handleBuyNow();
-                    },
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 4,
-                    ),
-                    child: const Text(
-                      'Buy Now',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
               ],
             );
         },
@@ -3162,16 +2475,16 @@ class _HomePageState extends State<HomePage> {
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_cartNotificationCount}'),
-            isLabelVisible: _cartNotificationCount > 0,
+            label: Text('${_cartManager.items.length}'),
+            isLabelVisible: _cartManager.items.length > 0,
             child: const Icon(Icons.shopping_cart),
           ),
           label: 'Cart',
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_wishlistNotificationCount}'),
-            isLabelVisible: _wishlistNotificationCount > 0,
+            label: Text('${_wishlistManager.items.length}'),
+            isLabelVisible: _wishlistManager.items.length > 0,
             child: const Icon(Icons.favorite),
           ),
           label: 'Wishlist',
