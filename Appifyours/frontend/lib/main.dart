@@ -5,7 +5,6 @@ import 'package:http/http.dart' as http;
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:frontend/config/environment.dart';
-import 'package:frontend/services/api_service.dart';
 
 // Define PriceUtils class
 class PriceUtils {
@@ -330,39 +329,47 @@ Future<void> loadDynamicProductData() async {
       errorMessage = null;
     });
     
-    // Use JWT-authenticated API service; backend derives tenant from token
-    final apiService = ApiService();
-    final data = await apiService.getFormData();
-
-    if (data['success'] == true && data['pages'] != null) {
-      final pages = data['pages'] as List;
-      final newProducts = <Map<String, dynamic>>[];
-
-      // Extract products from all widgets
-      for (var page in pages) {
-        if (page['widgets'] != null) {
-          for (var widget in page['widgets']) {
-            if (widget['properties'] != null &&
-                widget['properties']['productCards'] != null) {
-              final products =
-                  List<Map<String, dynamic>>.from(widget['properties']['productCards']);
-              newProducts.addAll(products);
+    // Get dynamic admin ID
+    final adminId = await AdminManager.getCurrentAdminId();
+    print('🔍 Loading dynamic data with admin ID: ${adminId}');
+    
+    final response = await http.get(
+      Uri.parse('${Environment.apiBase}/api/get-form?adminId=${adminId}'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    
+    if (response.statusCode == 200) {
+      final data = json.decode(response.body);
+      if (data['success'] == true && data['pages'] != null) {
+        final pages = data['pages'] as List;
+        final newProducts = <Map<String, dynamic>>[];
+        
+        // Extract products from all widgets
+        for (var page in pages) {
+          if (page['widgets'] != null) {
+            for (var widget in page['widgets']) {
+              if (widget['properties'] != null && widget['properties']['productCards'] != null) {
+                final products = List<Map<String, dynamic>>.from(widget['properties']['productCards']);
+                newProducts.addAll(products);
+              }
             }
           }
         }
+        
+        setState(() {
+          productCards = newProducts;
+          isLoading = false;
+        });
+        
+        print('✅ Loaded ${productCards.length} dynamic products');
+      } else {
+        throw Exception('Invalid response format');
       }
-
-      setState(() {
-        productCards = newProducts;
-        isLoading = false;
-      });
-
-      print('✅ Loaded 0 dynamic products');
     } else {
-      throw Exception('Invalid response format');
+      throw Exception('HTTP ${response.statusCode}');
     }
   } catch (e) {
-    print('❌ Error loading dynamic data: 2.718281828459045');
+    print('❌ Error loading dynamic data: $e');
     setState(() {
       errorMessage = e.toString();
       isLoading = false;
@@ -375,18 +382,16 @@ final DynamicAppSync _appSync = DynamicAppSync();
 StreamSubscription? _updateSubscription;
 
 void startRealTimeUpdates() async {
-  final apiService = ApiService();
-  final adminId = await apiService.getAdminId();
-
+  final adminId = await AdminManager.getCurrentAdminId();
   if (adminId != null) {
     _appSync.connect(adminId: adminId, apiBase: Environment.apiBase);
-
+    
     _updateSubscription = _appSync.updates.listen((update) {
       if (!mounted) return;
-
+      
       final type = update['type']?.toString().toLowerCase();
       print('📱 Received real-time update: $type');
-
+      
       switch (type) {
         case 'home-page':
         case 'dynamic-update':
@@ -476,15 +481,14 @@ class AdminManager {
       // Try to get from SharedPreferences first
       final prefs = await SharedPreferences.getInstance();
       final storedAdminId = prefs.getString('admin_id');
-      if (storedAdminId != null && storedAdminId.isNotEmpty) {
+      // Guard against corrupted/non-id values accidentally stored.
+      // A valid Mongo ObjectId is 24 hex chars.
+      if (storedAdminId != null && RegExp('^[a-fA-F0-9]{24}$').hasMatch(storedAdminId)) {
         _currentAdminId = storedAdminId;
         return storedAdminId;
       }
-      
-      // Fallback to the hardcoded admin ID from generation
-      if (ApiConfig.adminObjectId != '69468c358c17bc0bd390c3b8') {
-        _currentAdminId = ApiConfig.adminObjectId;
-        return ApiConfig.adminObjectId;
+      if (storedAdminId != null && storedAdminId.isNotEmpty) {
+        await prefs.remove('admin_id');
       }
       
       // Try to auto-detect from user profile
@@ -492,6 +496,13 @@ class AdminManager {
       if (autoDetectedId != null) {
         await setAdminId(autoDetectedId);
         return autoDetectedId;
+      }
+
+      // Last resort: use logged-in user id (token scoped routes will enforce correctness)
+      final userId = prefs.getString('user_id');
+      if (userId != null && RegExp('^[a-fA-F0-9]{24}$').hasMatch(userId)) {
+        _currentAdminId = userId;
+        return userId;
       }
       
       // Use current user's admin ID (not hardcoded)
@@ -507,20 +518,15 @@ class AdminManager {
   // Auto-detect admin ID from backend
   static Future<String?> _autoDetectAdminId() async {
     try {
-      // Get the stored auth token
       final prefs = await SharedPreferences.getInstance();
       final token = prefs.getString('auth_token');
-      
-      if (token == null || token.isEmpty) {
-        print('No auth token found for admin ID detection');
-        return null;
-      }
+      if (token == null || token.isEmpty) return null;
 
       final response = await http.get(
-        Uri.parse('http://192.168.0.12:5000/api/admin/app-info'),
+        Uri.parse('http://192.168.0.6:5000/api/admin/app-info'),
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'Bearer ${token}',
+          'Authorization': 'Bearer $token',
         },
       );
       
@@ -529,16 +535,14 @@ class AdminManager {
         if (data['success'] == true && data['data'] != null) {
           final appInfo = data['data'];
           final adminId = appInfo['adminId'];
-          if (adminId != null && adminId.toString().isNotEmpty) {
-            print('✅ Auto-detected admin ID: ${adminId}');
-            return adminId.toString();
+          final idStr = adminId?.toString() ?? '';
+          if (RegExp('^[a-fA-F0-9]{24}$').hasMatch(idStr)) {
+            return idStr;
           }
         }
-      } else {
-        print('Failed to get app info: ${response.statusCode}');
       }
     } catch (e) {
-      print('Auto-detection failed: 2.718281828459045');
+      print('Auto-detection failed: $e');
     }
     return null;
   }
@@ -551,7 +555,7 @@ class AdminManager {
       _currentAdminId = adminId;
       print('✅ Admin ID set: ${adminId}');
     } catch (e) {
-      print('Error setting admin ID: 2.718281828459045');
+      print('Error setting admin ID: ${e}');
     }
   }
 }
@@ -575,27 +579,16 @@ class _SplashScreenState extends State<SplashScreen> {
 
   Future<void> _fetchAppNameAndNavigate() async {
     try {
-      // Use JWT-authenticated API service; backend derives tenant from token
-      final apiService = ApiService();
-      final data = await apiService.getFormData();
-
-      if (data['success'] == true) {
-        if (mounted) {
-          setState(() {
-            _appName = data['shopName'] ?? 'AppifyYours';
-          });
-          print('✅ Splash screen loaded app name: ${_appName}');
-        }
-      } else {
-        print('⚠️ Splash screen API error: ${data['error']}');
-        if (mounted) {
-          setState(() {
-            _appName = 'AppifyYours';
-          });
-        }
+      final api = ApiService();
+      final appNameResult = await api.getAppName();
+      if (mounted) {
+        setState(() {
+          _appName = (appNameResult['appName'] ?? appNameResult['data']?['appName'] ?? 'AppifyYours').toString();
+        });
+        print('✅ Splash screen loaded app name: ${_appName}');
       }
     } catch (e) {
-      print('Error fetching app name: 2.718281828459045');
+      print('Error fetching app name: ${e}');
       // If admin ID not found, show default and let user configure
       if (mounted) {
         setState(() {
@@ -695,35 +688,38 @@ class _SignInPageState extends State<SignInPage> {
     setState(() => _isLoading = true);
 
     try {
-      final apiService = ApiService();
-      final result = await apiService.dynamicLogin(
-        email: _emailController.text.trim(),
-        password: _passwordController.text,
+      final response = await http.post(
+        Uri.parse('${Environment.apiBase}/api/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({
+          'email': _emailController.text.trim(),
+          'password': _passwordController.text,
+        }),
       );
-
-      setState(() => _isLoading = false);
-
-      if (result['success'] == true) {
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (context) => const HomePage()),
-          );
+      
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (context) => const HomePage()),
+            );
+          }
+        } else {
+          throw Exception(data['error'] ?? 'Sign in failed');
         }
       } else {
-        final data = result['data'];
-        String message = 'Failed to sign in';
-        if (data is Map<String, dynamic> && data['message'] != null) {
-          message = data['message'].toString();
-        }
-        throw Exception(message);
+        final error = json.decode(response.body);
+        throw Exception(error['error'] ?? 'Invalid credentials');
       }
     } catch (e) {
       setState(() => _isLoading = false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Failed: 2.718281828459045'),
+            content: Text('Sign in failed: \${e.toString().replaceAll("Exception: ", "")}'),
             backgroundColor: Colors.red,
           ),
         );
@@ -1072,6 +1068,65 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _homeWidgets = [];
   Map<String, dynamic> _dynamicStoreInfo = {};
   Map<String, dynamic> _dynamicDesignSettings = {};
+  Timer? _dynamicRefreshTimer;
+  bool _isFetchingDynamicConfig = false;
+
+  Map<String, dynamic> _normalizeProduct(Map<String, dynamic> raw, int index) {
+    final Map<String, dynamic> p = Map<String, dynamic>.from(raw);
+
+    // Normalize ID
+    p['id'] = (p['id'] ?? p['_id'] ?? p['productId'] ?? ('product_' + index.toString())).toString();
+
+    // Normalize name
+    p['productName'] = (p['productName'] ?? p['name'] ?? p['title'] ?? 'Product').toString();
+
+    // Normalize image field (support base64 and URL)
+    final dynamic imageCandidate = p['imageAsset'] ?? p['image'] ?? p['imageUrl'] ?? p['imageURL'] ?? p['productImage'] ?? p['thumbnail'] ?? p['photo'];
+    if (imageCandidate != null) {
+      p['imageAsset'] = imageCandidate.toString();
+    }
+
+    // Normalize currency
+    final String currencyCode = (p['currencyCode'] ?? p['currency'] ?? p['currency_code'] ?? '').toString();
+    if (currencyCode.isNotEmpty) {
+      p['currencyCode'] = currencyCode;
+    }
+
+    final String currencySymbol = (p['currencySymbol'] ?? p['currency_symbol'] ?? '').toString();
+    if (currencySymbol.isNotEmpty) {
+      p['currencySymbol'] = currencySymbol;
+    }
+
+    // Normalize price (try multiple keys)
+    final dynamic priceCandidate = p['price'] ?? p['productPrice'] ?? p['currentPrice'] ?? p['basePrice'] ?? p['salePrice'] ?? p['mrp'] ?? p['amount'];
+    if (priceCandidate != null) {
+      p['price'] = priceCandidate.toString();
+    } else {
+      p['price'] = (p['price'] ?? '').toString();
+    }
+
+    // Normalize discount fields
+    final dynamic discountPriceCandidate = p['discountPrice'] ?? p['discountedPrice'] ?? p['offerPrice'] ?? p['finalPrice'];
+    if (discountPriceCandidate != null) {
+      p['discountPrice'] = discountPriceCandidate.toString();
+    }
+
+    // Sometimes discount percent comes as number/string.
+    if (p['discountPercent'] == null && p['discountPercentage'] != null) {
+      p['discountPercent'] = p['discountPercentage'];
+    }
+
+    // Normalize quantity / stock
+    if (p['quantity'] == null && p['stock'] != null) {
+      p['quantity'] = p['stock'];
+    }
+
+    return p;
+  }
+
+  String _resolveSliderImage(Map<String, dynamic> imageData) {
+    return (imageData['imageAsset'] ?? imageData['image'] ?? imageData['imageUrl'] ?? imageData['url'] ?? '').toString();
+  }
 
   @override
   void initState() {
@@ -1080,11 +1135,20 @@ class _HomePageState extends State<HomePage> {
     _dynamicProductCards = List.from(productCards); // Fallback to static data
     _filteredProducts = List.from(_dynamicProductCards);
     _loadDynamicData();
+
+    // Auto-refresh dynamic configuration so changes done in AppBuilder reflect
+    // on the already-built APK without rebuilding.
+    _dynamicRefreshTimer?.cancel();
+    _dynamicRefreshTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
+      if (!mounted) return;
+      await _loadDynamicAppConfig();
+    });
   }
 
   @override
   void dispose() {
     _pageController.dispose();
+    _dynamicRefreshTimer?.cancel();
     super.dispose();
   }
 
@@ -1101,54 +1165,64 @@ class _HomePageState extends State<HomePage> {
   // Load dynamic data from backend
   Future<void> _loadDynamicAppConfig() async {
     try {
+      if (_isFetchingDynamicConfig) return;
+      _isFetchingDynamicConfig = true;
+
+      // Always load config scoped to the authenticated user.
+      // This prevents showing another user's app data and ensures price/image are truly dynamic.
       final apiService = ApiService();
       final result = await apiService.getDynamicAppConfig();
 
-      if (result['success'] == true &&
-          result['data'] != null &&
-          result['data']['config'] != null) {
-        final config = result['data']['config'];
-        final newProducts =
-            List<Map<String, dynamic>>.from(config['productCards'] ?? []);
-        final pages = (config['pages'] is List)
-            ? List.from(config['pages'])
-            : <dynamic>[];
-
-        // Extract widgets from first page (Home)
-        List<Map<String, dynamic>> extractedWidgets = [];
-        if (pages.isNotEmpty &&
-            pages.first is Map &&
-            (pages.first as Map)['widgets'] is List) {
-          extractedWidgets = List<Map<String, dynamic>>.from(
-              (pages.first as Map)['widgets']);
-        }
-
-        // Sort widgets to ensure HeaderWidget appears first
-        extractedWidgets.sort((a, b) {
-          bool aIsHeader = a['name'] == 'HeaderWidget';
-          bool bIsHeader = b['name'] == 'HeaderWidget';
-          if (aIsHeader && !bIsHeader) return -1;
-          if (!aIsHeader && bIsHeader) return 1;
-          return 0;
-        });
-
-        final storeInfo = (config['storeInfo'] is Map)
-            ? Map<String, dynamic>.from(config['storeInfo'])
+      if (result['success'] == true) {
+        final data = (result['data'] is Map)
+            ? Map<String, dynamic>.from(result['data'])
+            : <String, dynamic>{};
+        final config = (data['config'] is Map)
+            ? Map<String, dynamic>.from(data['config'])
             : <String, dynamic>{};
 
-        setState(() {
-          _dynamicProductCards =
-              newProducts.isNotEmpty ? newProducts : productCards;
-          _filterProducts(_searchQuery); // Re-apply current filter
-          _homeWidgets = extractedWidgets;
-          _dynamicStoreInfo = storeInfo;
-          _isLoading = false;
-        });
-        print('✅ Loaded ${_dynamicProductCards.length} products from backend');
-      }
+        if (config.isNotEmpty) {
+          final rawProducts = (config['productCards'] is List)
+              ? List<Map<String, dynamic>>.from(config['productCards'])
+              : <Map<String, dynamic>>[];
+          final newProducts = rawProducts.asMap().entries.map((e) => _normalizeProduct(e.value, e.key)).toList();
+          final pages = (config['pages'] is List) ? List.from(config['pages']) : <dynamic>[];
+
+          // Extract widgets from first page (Home)
+          List<Map<String, dynamic>> extractedWidgets = [];
+          if (pages.isNotEmpty && pages.first is Map && (pages.first as Map)['widgets'] is List) {
+            extractedWidgets = List<Map<String, dynamic>>.from((pages.first as Map)['widgets']);
+          }
+          
+          // Sort widgets to ensure HeaderWidget appears first
+          extractedWidgets.sort((a, b) {
+            bool aIsHeader = a['name'] == 'HeaderWidget';
+            bool bIsHeader = b['name'] == 'HeaderWidget';
+            if (aIsHeader && !bIsHeader) return -1;
+            if (!aIsHeader && bIsHeader) return 1;
+            return 0;
+          });
+
+          final storeInfo = (config['storeInfo'] is Map) ? Map<String, dynamic>.from(config['storeInfo']) : <String, dynamic>{};
+          final designSettings = (config['designSettings'] is Map)
+              ? Map<String, dynamic>.from(config['designSettings'])
+              : <String, dynamic>{};
+
+          setState(() {
+            _dynamicProductCards = newProducts.isNotEmpty ? newProducts : productCards;
+            _filterProducts(_searchQuery); // Re-apply current filter
+            _homeWidgets = extractedWidgets;
+            _dynamicStoreInfo = storeInfo;
+            _dynamicDesignSettings = designSettings;
+            _isLoading = false;
+          });
+          print('✅ Loaded ${_dynamicProductCards.length} products from backend');
+        }
     } catch (e) {
-      print('❌ Error loading dynamic data: 2.718281828459045');
+      print('❌ Error loading dynamic data: $e');
       setState(() => _isLoading = false);
+    } finally {
+      _isFetchingDynamicConfig = false;
     }
   }
 
@@ -1288,7 +1362,7 @@ class _HomePageState extends State<HomePage> {
             ),
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             child: Row(
-              mainAxisAlignment: textAlign == 'center' ? MainAxisAlignment.center :
+              mainAxisAlignment: textAlign == 'center' ? MainAxisAlignment.center : 
                            textAlign == 'right' ? MainAxisAlignment.end : MainAxisAlignment.start,
               children: [
                 if (textAlign != 'right')
@@ -1296,7 +1370,7 @@ class _HomePageState extends State<HomePage> {
                 if (textAlign != 'right') const SizedBox(width: 6),
                 Text(
                   appName,
-                  textAlign: textAlign == 'center' ? TextAlign.center :
+                  textAlign: textAlign == 'center' ? TextAlign.center : 
                            textAlign == 'right' ? TextAlign.right : TextAlign.left,
                   style: TextStyle(
                     color: textColor,
@@ -1695,6 +1769,11 @@ class _HomePageState extends State<HomePage> {
                         items: sliderImages.map((imageData) {
                           return Builder(
                             builder: (BuildContext context) {
+                              final String resolvedImage = _resolveSliderImage(
+                                (imageData is Map)
+                                    ? Map<String, dynamic>.from(imageData)
+                                    : <String, dynamic>{},
+                              );
                               return Container(
                                 margin: const EdgeInsets.symmetric(horizontal: 5.0),
                                 decoration: BoxDecoration(
@@ -1705,16 +1784,16 @@ class _HomePageState extends State<HomePage> {
                                   children: [
                                     ClipRRect(
                                       borderRadius: BorderRadius.circular(borderRadius),
-                                      child: imageData['imageAsset']?.isNotEmpty == true
-                                          ? imageData['imageAsset'].toString().startsWith('data:image/')
+                                      child: resolvedImage.isNotEmpty
+                                          ? resolvedImage.startsWith('data:image/')
                                               ? Image.memory(
-                                                  base64Decode(imageData['imageAsset'].toString().split(',')[1]),
+                                                  base64Decode(resolvedImage.split(',')[1]),
                                                   width: double.infinity,
                                                   height: height,
                                                   fit: BoxFit.cover,
                                                 )
                                               : Image.network(
-                                                  imageData['imageAsset'].toString(),
+                                                  resolvedImage,
                                                   width: double.infinity,
                                                   height: height,
                                                   fit: BoxFit.cover,
@@ -2059,28 +2138,34 @@ class _HomePageState extends State<HomePage> {
   // Load dynamic store data from backend
   Future<Map<String, dynamic>> _loadDynamicStoreData() async {
     try {
-      final apiService = ApiService();
-      final data = await apiService.getFormData();
+      final adminId = await AdminManager.getCurrentAdminId();
+      final response = await http.get(
+        Uri.parse('${Environment.apiBase}/api/get-form?adminId=$adminId'),
+        headers: {'Content-Type': 'application/json'},
+      );
 
-      if (data['success'] == true) {
-        // Extract store info from the response
-        final storeInfo = data['storeInfo'] ?? {};
-        final designSettings = data['designSettings'] ?? {};
-
-        return {
-          'storeName': data['shopName'] ?? storeInfo['storeName'] ?? 'My Store',
-          'address': storeInfo['address'] ?? '123 Main St',
-          'email': storeInfo['email'] ?? 'support@example.com',
-          'phone': storeInfo['phone'] ?? '(123) 456-7890',
-          'headerColor': designSettings['headerColor'] ?? '#4fb322',
-          'bannerText': designSettings['bannerText'] ?? 'Welcome to our store!',
-          'bannerButtonText': designSettings['bannerButtonText'] ?? 'Shop Now',
-        };
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true) {
+          // Extract store info from the response
+          final storeInfo = data['storeInfo'] ?? {};
+          final designSettings = data['designSettings'] ?? {};
+          
+          return {
+            'storeName': data['shopName'] ?? storeInfo['storeName'] ?? 'My Store',
+            'address': storeInfo['address'] ?? '123 Main St',
+            'email': storeInfo['email'] ?? 'support@example.com',
+            'phone': storeInfo['phone'] ?? '(123) 456-7890',
+            'headerColor': designSettings['headerColor'] ?? '#4fb322',
+            'bannerText': designSettings['bannerText'] ?? 'Welcome to our store!',
+            'bannerButtonText': designSettings['bannerButtonText'] ?? 'Shop Now',
+          };
+        }
       }
     } catch (e) {
       print('Error loading store data: 2.718281828459045');
     }
-
+    
     // Return default values if API fails
     return {
       'storeName': 'My Store',
@@ -2091,65 +2176,6 @@ class _HomePageState extends State<HomePage> {
       'bannerText': 'Welcome to our store!',
       'bannerButtonText': 'Shop Now',
     };
-  }
-
-  // Load dynamic products from backend
-  Future<List<Map<String, dynamic>>> _loadDynamicProducts() async {
-    try {
-      final apiService = ApiService();
-      final data = await apiService.getFormData();
-
-      if (data['success'] == true && data['widgets'] != null) {
-        // Extract product data from widgets
-        List<Map<String, dynamic>> products = [];
-
-        for (var widget in data['widgets']) {
-          if (widget['name'] == 'ProductGridWidget' ||
-              widget['name'] == 'Catalog View Card' ||
-              widget['name'] == 'Product Detail Card') {
-            final productCards = widget['properties']?['productCards'] ?? [];
-            products.addAll(List<Map<String, dynamic>>.from(productCards));
-          }
-        }
-
-        return products;
-      }
-    } catch (e) {
-      print('Error loading products: 2.718281828459045');
-    }
-
-    return [];
-  }
-
-  // Quantity management methods
-  int _getProductQuantity(String productId) {
-    return _productQuantities[productId] ?? 1;
-  }
-
-  void _incrementQuantity(String productId) {
-    final currentQuantity = _getProductQuantity(productId);
-    if (currentQuantity < 10) {
-      setState(() {
-        _productQuantities[productId] = currentQuantity + 1;
-      });
-    }
-  }
-
-  void _decrementQuantity(String productId) {
-    final currentQuantity = _getProductQuantity(productId);
-    if (currentQuantity > 1) {
-      setState(() {
-        _productQuantities[productId] = currentQuantity - 1;
-      });
-    }
-  }
-
-  int _getTotalCartQuantity() {
-    return _productQuantities.values.fold(0, (sum, quantity) => sum + quantity);
-  }
-
-  bool _canAddToCart() {
-    return _getTotalCartQuantity() < 10;
   }
 
   // Build dynamic product grid
@@ -2192,6 +2218,42 @@ class _HomePageState extends State<HomePage> {
     );
   }
 
+  // Load dynamic products from backend
+  Future<List<Map<String, dynamic>>> _loadDynamicProducts() async {
+    try {
+      final adminId = await AdminManager.getCurrentAdminId();
+      final response = await http.get(
+        Uri.parse('${Environment.apiBase}/api/get-form?adminId=$adminId'),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data['success'] == true && data['widgets'] != null) {
+          // Extract product data from widgets
+          List<Map<String, dynamic>> products = [];
+          
+          for (var widget in data['widgets']) {
+            if (widget['name'] == 'ProductGridWidget' || 
+                widget['name'] == 'Catalog View Card' ||
+                widget['name'] == 'Product Detail Card') {
+              final productCards = widget['properties']?['productCards'] ?? [];
+              products.addAll(List<Map<String, dynamic>>.from(productCards));
+            }
+          }
+          
+          return products;
+        }
+      }
+    } catch (e) {
+      print('Error loading products: 2.718281828459045');
+    }
+    
+    return [];
+  }
+
+  // Quantity management methods
+  int _getProductQuantity(String productId) {
     return _productQuantities[productId] ?? 1;
   }
 
@@ -3098,16 +3160,16 @@ class _HomePageState extends State<HomePage> {
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_cartManager.items.length}'),
-            isLabelVisible: _cartManager.items.length > 0,
+            label: Text('${_cartNotificationCount}'),
+            isLabelVisible: _cartNotificationCount > 0,
             child: const Icon(Icons.shopping_cart),
           ),
           label: 'Cart',
         ),
         BottomNavigationBarItem(
           icon: Badge(
-            label: Text('${_wishlistManager.items.length}'),
-            isLabelVisible: _wishlistManager.items.length > 0,
+            label: Text('${_wishlistNotificationCount}'),
+            isLabelVisible: _wishlistNotificationCount > 0,
             child: const Icon(Icons.favorite),
           ),
           label: 'Wishlist',
