@@ -1017,47 +1017,76 @@ class ApiService {
   }
 
   // Get app info for admin-user linking
-  Future<Map<String, dynamic>> getAppInfo() async {
+  Future<Map<String, dynamic>> getAppInfo({bool clearCache = false}) async {
     try {
       print('Getting app info - using baseUrl: $baseUrl');
       
-      // Get the stored auth token
-      final token = await _getToken();
+      // Get JWT token
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('token');
       
-      if (token == null || token.isEmpty) {
-        print('No auth token found for app info request');
-        return {
-          'success': false,
-          'data': {
-            'adminId': '', // No hardcoded fallback
-            'appName': 'MyApp',
-            'company': 'Appifyours',
-            'version': '1.0.0'
+      // Clear cache if requested
+      if (clearCache) {
+        await prefs.remove('cached_app_info');
+        await prefs.remove('cached_app_info_timestamp');
+        print('App info cache cleared');
+      }
+      
+      // Check cache first (if not clearing)
+      if (!clearCache) {
+        final cachedData = prefs.getString('cached_app_info');
+        final cachedTimestamp = prefs.getInt('cached_app_info_timestamp');
+        
+        if (cachedData != null && cachedTimestamp != null) {
+          final cacheAge = DateTime.now().millisecondsSinceEpoch - cachedTimestamp;
+          // Use cache if it's less than 5 minutes old
+          if (cacheAge < 5 * 60 * 1000) {
+            print('Using cached app info (${(cacheAge / 1000).toInt()} seconds old)');
+            return json.decode(cachedData);
+          } else {
+            print('App info cache expired, clearing...');
+            await prefs.remove('cached_app_info');
+            await prefs.remove('cached_app_info_timestamp');
           }
-        };
+        }
+      }
+      
+      final headers = {
+        'Content-Type': 'application/json',
+      };
+      
+      // Add authorization header if token exists
+      if (token != null && token.isNotEmpty) {
+        headers['Authorization'] = 'Bearer $token';
+        print('Adding JWT token to app info request');
       }
       
       final response = await http.get(
         Uri.parse('$baseUrl/api/admin/app-info'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
+        headers: headers,
       );
 
       print('App info response status: ${response.statusCode}');
       print('App info response body: ${response.body}');
 
+      Map<String, dynamic> result;
+      
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return {
+        result = {
           'success': true,
           'data': data,
           'statusCode': response.statusCode,
         };
+        
+        // Cache the successful response
+        await prefs.setString('cached_app_info', json.encode(result));
+        await prefs.setInt('cached_app_info_timestamp', DateTime.now().millisecondsSinceEpoch);
+        print('App info cached successfully');
+        
       } else {
         print('App info request failed with status: ${response.statusCode}');
-        return {
+        result = {
           'success': false,
           'data': {
             'adminId': '', // No hardcoded fallback
@@ -1068,6 +1097,8 @@ class ApiService {
           'statusCode': response.statusCode,
         };
       }
+      
+      return result;
     } catch (e) {
       print('Error getting app info: $e');
       return {
@@ -1081,6 +1112,14 @@ class ApiService {
         'statusCode': 500,
       };
     }
+  }
+
+  // Clear app info cache
+  Future<void> clearAppInfoCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('cached_app_info');
+    await prefs.remove('cached_app_info_timestamp');
+    print('App info cache cleared manually');
   }
 
   // Enhanced signup with admin and shop linking
