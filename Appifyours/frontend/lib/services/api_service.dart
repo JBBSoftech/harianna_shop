@@ -959,6 +959,9 @@ class ApiService {
   Future<Map<String, dynamic>> getAppName({String? adminId}) async {
     try {
       print('Getting app name with adminId: $adminId');
+
+      final prefs = await SharedPreferences.getInstance();
+      final token = prefs.getString('auth_token');
       
       // Build URL with adminId parameter
       String url = '$baseUrl/api/admin/splash';
@@ -966,7 +969,13 @@ class ApiService {
         url += '?adminId=$adminId';
       }
       
-      final response = await http.get(Uri.parse(url));
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {
+          'Content-Type': 'application/json',
+          if (token != null && token.isNotEmpty) 'Authorization': 'Bearer $token',
+        },
+      );
       
       if (response.statusCode == 200) {
         return json.decode(response.body);
